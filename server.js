@@ -410,6 +410,28 @@ app.get('/api/stats/channel', async (req, res) => {
 });
 
 
+// ── トップページ → player.html ──────────────────────
+app.get('/', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'player.html'));
+});
+
+// ── チャンネル名サジェストAPI ─────────────────────────
+app.get('/api/suggest', async (req, res) => {
+    const q = (req.query.q || '').toLowerCase().trim();
+    if (!q) return res.json({ channels: [] });
+    try {
+        const channels = await getAllChannels();
+        const matched = channels
+            .filter(ch => ch.name.toLowerCase().includes(q))
+            .sort((a, b) => b.subs - a.subs)
+            .slice(0, 4)
+            .map(ch => ({ name: ch.name, icon: ch.icon || '', subs: ch.subs }));
+        res.json({ channels: matched });
+    } catch(e) {
+        res.json({ channels: [] });
+    }
+});
+
 // ── Static files ─────────────────────────────────────
 // ルートパスで静的ファイルを提供（/streamer/ 配下からでも /Default_icon.jpg が取れるよう両方登録）
 app.use(express.static(path.join(__dirname)));
