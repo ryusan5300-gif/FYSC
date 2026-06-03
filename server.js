@@ -1,99 +1,133 @@
-const express = require('express');
-const fs      = require('fs');
-const path    = require('path');
-const app     = express();
-const PORT    = 3000;
+const express  = require('express');
+const { Pool } = require('pg');
+const app      = express();
+const PORT     = process.env.PORT || 3000;
 
-const DATA_FILE = path.join(__dirname, 'data.json');
+// YouTube Data API key
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyDAJfuzKGV1aqOyvY-b6kJIwajlwe4LNkQ';
 
-// YouTube Data API キー
-const YOUTUBE_API_KEY = 'AIzaSyDAJfuzKGV1aqOyvY-b6kJIwajlwe4LNkQ';
+// ── PostgreSQL 接続 ──────────────────────────────────
+// Render が DATABASE_URL を自動でセットしてくれる
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+});
 
-if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify({ channels: [], videos: [] }));
-
-function readData() {
-    try {
-        const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-        if (Array.isArray(raw)) {
-            return { channels: raw, videos: [] };
-        }
-        return {
-            channels: raw.channels || [],
-            videos: raw.videos || []
-        };
-    } catch (e) { return { channels: [], videos: [] }; }
+// ── テーブル初期化 ───────────────────────────────────
+async function initDB() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS channels (
+            name        TEXT PRIMARY KEY,
+            subs        INTEGER NOT NULL DEFAULT 0,
+            icon        TEXT    NOT NULL DEFAULT '',
+            growth      INTEGER NOT NULL DEFAULT 0,
+            views       INTEGER NOT NULL DEFAULT 0,
+            view_growth INTEGER NOT NULL DEFAULT 0
+        )
+    `);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS videos (
+            id           TEXT PRIMARY KEY,
+            title        TEXT    NOT NULL DEFAULT 'No Title',
+            channel_name TEXT    NOT NULL DEFAULT '',
+            channel_icon TEXT    NOT NULL DEFAULT '',
+            views        INTEGER NOT NULL DEFAULT 0,
+            view_growth  INTEGER NOT NULL DEFAULT 0
+        )
+    `);
+    console.log('DB tables ready.');
 }
 
-function saveData(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+// ── データ読み書きヘルパー ────────────────────────────
+async function getAllChannels() {
+    const { rows } = await pool.query(
+        'SELECT name, subs, icon, growth, views, view_growth AS "viewGrowth" FROM channels'
+    );
+    return rows;
 }
 
+async function getAllVideos() {
+    const { rows } = await pool.query(
+        `SELECT id, title, channel_name AS "channelName", channel_icon AS "channelIcon",
+                views, view_growth AS "viewGrowth"
+         FROM videos WHERE title IS NOT NULL AND title <> ''`
+    );
+    return rows;
+}
+
+async function upsertChannel(ch) {
+    await pool.query(`
+        INSERT INTO channels (name, subs, icon, growth, views, view_growth)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (name) DO UPDATE SET
+            subs        = EXCLUDED.subs,
+            icon        = EXCLUDED.icon,
+            growth      = EXCLUDED.growth,
+            views       = EXCLUDED.views,
+            view_growth = EXCLUDED.view_growth
+    `, [ch.name, ch.subs||0, ch.icon||'', ch.growth||0, ch.views||0, ch.viewGrowth||0]);
+}
+
+async function insertVideo(v) {
+    await pool.query(`
+        INSERT INTO videos (id, title, channel_name, channel_icon, views, view_growth)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (id) DO NOTHING
+    `, [v.id, v.title, v.channelName||'', v.channelIcon||'', v.views||0, v.viewGrowth||0]);
+}
+
+// ── ユーティリティ ───────────────────────────────────
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 const fetchFn = typeof fetch !== 'undefined'
     ? fetch
     : (...a) => import('node-fetch').then(m => m.default(...a));
 
-// ── 定期的な Growth → Subs / Views 変換 ──
-setInterval(() => {
-    const data = readData();
-    let dirty = false;
+function buildSortedChannels(channels) {
+    return [...channels].sort((a, b) => b.subs - a.subs).slice(0, 50);
+}
 
-    data.channels.forEach(u => {
-        if (u.growth > 0) {
-            const convert = Math.max(1, Math.ceil(u.growth / 1200));
-            u.subs   += convert;
-            u.growth  = Math.max(0, u.growth - convert);
-            dirty = true;
-        }
-        if (u.viewGrowth > 0) {
-            const convert = Math.max(1, Math.ceil(u.viewGrowth / 1200));
-            u.views      += convert;
-            u.viewGrowth  = Math.max(0, u.viewGrowth - convert);
-            dirty = true;
-        }
-    });
-
-    if (data.videos && data.videos.length) {
-        data.videos = data.videos.filter(v => v.title);
-        data.videos.forEach(v => {
-            if (v.viewGrowth > 0) {
-                const convert = Math.max(1, Math.ceil(v.viewGrowth / 1200));
-                v.views      += convert;
-                v.viewGrowth  = Math.max(0, v.viewGrowth - convert);
-                dirty = true;
-            }
-        });
+// ── 定期的な Growth → Subs / Views 変換 (3秒ごと) ──
+setInterval(async () => {
+    try {
+        // channels
+        await pool.query(`
+            UPDATE channels SET
+                subs        = subs        + GREATEST(1, CEIL(growth      / 1200.0)),
+                growth      = GREATEST(0, growth      - GREATEST(1, CEIL(growth      / 1200.0))),
+                views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
+                view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
+            WHERE growth > 0 OR view_growth > 0
+        `);
+        // videos
+        await pool.query(`
+            UPDATE videos SET
+                views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
+                view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
+            WHERE view_growth > 0
+        `);
+    } catch (e) {
+        console.error('Growth tick error:', e.message);
     }
-
-    if (dirty) saveData(data);
 }, 3000);
 
-// ── ランキング順位変動検知 ──
+// ── ランキング順位変動検知 ────────────────────────────
 let rankingVersion = 0;
 let lastOrderStr   = '';
 
-function buildSortedChannels(data) {
-    return [...data.channels].sort((a, b) => b.subs - a.subs).slice(0, 50);
-}
-
-setInterval(() => {
-    const data = readData();
-    const sorted  = buildSortedChannels(data);
-    const orderStr = sorted.map(u => u.name).join('|');
-    if (orderStr !== lastOrderStr && lastOrderStr !== '') {
-        rankingVersion++;
-    }
-    lastOrderStr = orderStr;
+setInterval(async () => {
+    try {
+        const channels = await getAllChannels();
+        const sorted   = buildSortedChannels(channels);
+        const orderStr = sorted.map(u => u.name).join('|');
+        if (orderStr !== lastOrderStr && lastOrderStr !== '') rankingVersion++;
+        lastOrderStr = orderStr;
+    } catch (e) {}
 }, 3000);
 
-app.get('/api/ranking-version', (_req, res) => {
-    res.json({ version: rankingVersion });
-});
-
-// ── YouTube 検索ヘルパー ──
+// ── YouTube 検索ヘルパー ──────────────────────────────
 async function searchYouTubeChannel(query) {
-    if (YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') return null;
+    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') return null;
     try {
         const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=1&key=${YOUTUBE_API_KEY}`;
         const r   = await fetchFn(url);
@@ -110,127 +144,157 @@ async function searchYouTubeChannel(query) {
     } catch (e) { console.error('YT search error:', e.message); return null; }
 }
 
-// ── コマンド API（title 強制 "No Title" に対応） ──
-const RESTRICTED = ['video','short','stream','viral','trend','growth','subcount','viewcount'];
+// ── API: ranking-version ─────────────────────────────
+app.get('/api/ranking-version', (_req, res) => {
+    res.json({ version: rankingVersion });
+});
+
+// ── API: command ─────────────────────────────────────
+const RESTRICTED    = ['video','short','stream','viral','trend','growth','subcount','viewcount'];
+const videoCommands = ['video','short','stream','viral','trend'];
 
 app.get('/api/command', async (req, res) => {
     const { user, cmd, title } = req.query;
-    if (!user) return res.send('❌ User error');
+    if (!user) return res.send('User error');
 
-    const data = readData();
-    let idx    = data.channels.findIndex(u => u.name.toLowerCase() === user.toLowerCase());
+    try {
+        const { rows } = await pool.query(
+            'SELECT * FROM channels WHERE LOWER(name) = LOWER($1)', [user]
+        );
+        let ch = rows[0] || null;
 
-    if (idx === -1 && RESTRICTED.includes(cmd)) {
-        return res.send(`⚠️ @${user} You are not registered in the system & ranking. Use !add first.`);
-    }
-
-    let message = '';
-
-    const videoCommands = ['video','short','stream','viral','trend'];
-
-    switch (cmd) {
-        case 'add': {
-            const yt = await searchYouTubeChannel(user);
-            if (idx === -1) {
-                data.channels.push({
-                    name: user,
-                    subs: 0,
-                    icon: yt ? yt.icon : '',
-                    growth: 0,
-                    views: 0,
-                    viewGrowth: 0
-                });
-                idx = data.channels.length - 1;
-                message = `@${user} Added to rankings and system.`;
-            } else {
-                if (yt) { data.channels[idx].icon = yt.icon; }
-                message = `✅ @${user} is already in the ranking!`;
-            }
-            break;
+        if (!ch && RESTRICTED.includes(cmd)) {
+            return res.send(`@${user} You are not registered. Use !add first.`);
         }
-        case 'growth':   { message = `📊 @${user} Growth: ${data.channels[idx].growth.toLocaleString()}`; break; }
-        case 'subcount': { message = `📺 @${user} Subscribers: ${data.channels[idx].subs.toLocaleString()}`; break; }
-        case 'viewcount': { message = `👁️ @${user} Views: ${(data.channels[idx].views || 0).toLocaleString()}`; break; }
-        default: {
-            if (videoCommands.includes(cmd)) {
-                let g, vg, prefix;
-                switch (cmd) {
-                    case 'video':  g = rand(10, 50); vg = rand(g * 2, g * 4); prefix = '🎬'; break;
-                    case 'short':  g = rand(10, 50); vg = rand(g * 2, g * 4); prefix = '📱'; break;
-                    case 'stream': g = rand(1, 350); vg = rand(g * 2, g * 5); prefix = '🔴'; break;
-                    case 'viral':  g = rand(10, 500); vg = rand(g * 3, g * 6); prefix = '🚀'; break;
-                    case 'trend':  g = rand(10, 1000); vg = rand(g * 3, g * 7); prefix = '📈'; break;
+
+        let message = '';
+
+        switch (cmd) {
+            case 'add': {
+                const yt = await searchYouTubeChannel(user);
+                if (!ch) {
+                    await pool.query(
+                        `INSERT INTO channels (name, subs, icon, growth, views, view_growth)
+                         VALUES ($1, 0, $2, 0, 0, 0)`,
+                        [user, yt ? yt.icon : '']
+                    );
+                    message = `@${user} Added to rankings and system.`;
+                } else {
+                    if (yt) await pool.query('UPDATE channels SET icon=$1 WHERE LOWER(name)=LOWER($2)', [yt.icon, user]);
+                    message = `@${user} is already in the ranking!`;
                 }
+                break;
+            }
+            case 'growth':
+                message = `@${user} Growth: ${(ch.growth || 0).toLocaleString()}`;
+                break;
+            case 'subcount':
+                message = `@${user} Subscribers: ${(ch.subs || 0).toLocaleString()}`;
+                break;
+            case 'viewcount':
+                message = `@${user} Views: ${(ch.views || 0).toLocaleString()}`;
+                break;
+            default: {
+                if (videoCommands.includes(cmd)) {
+                    let g, vg, prefix;
+                    switch (cmd) {
+                        case 'video':  g = rand(10, 50);   vg = rand(g*2, g*4); prefix = '[Video]';  break;
+                        case 'short':  g = rand(10, 50);   vg = rand(g*2, g*4); prefix = '[Short]';  break;
+                        case 'stream': g = rand(1, 350);   vg = rand(g*2, g*5); prefix = '[Stream]'; break;
+                        case 'viral':  g = rand(10, 500);  vg = rand(g*3, g*6); prefix = '[Viral]';  break;
+                        case 'trend':  g = rand(10, 1000); vg = rand(g*3, g*7); prefix = '[Trend]';  break;
+                    }
 
-                // チャンネル成長を加算
-                data.channels[idx].growth    += g;
-                data.channels[idx].viewGrowth += vg;
+                    await pool.query(
+                        `UPDATE channels
+                         SET growth = growth + $1, view_growth = view_growth + $2
+                         WHERE LOWER(name) = LOWER($3)`,
+                        [g, vg, user]
+                    );
 
-                // ★ 動画タイトルがない場合は "No Title" に強制
-                const videoTitle = (title && title.trim() !== '') ? title.trim() : 'No Title';
+                    const videoTitle = (title && title.trim() !== '') ? title.trim() : 'No Title';
+                    const videoId    = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-                const videoId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-                const ch = data.channels[idx];
-                data.videos.push({
-                    id: videoId,
-                    title: videoTitle,
-                    channelName: ch.name,
-                    channelIcon: ch.icon || '',
-                    views: 0,
-                    viewGrowth: vg   // 動画の再生回数成長を設定
-                });
+                    // 最新のアイコンを取得
+                    const { rows: chRows } = await pool.query(
+                        'SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)', [user]
+                    );
+                    const icon = chRows[0] ? chRows[0].icon : '';
 
-                message = `${prefix} @${user} posted ${cmd}: ${videoTitle}!`;
-            } else {
-                return res.send(`❓ Unknown command: !${cmd}`);
+                    await pool.query(
+                        `INSERT INTO videos (id, title, channel_name, channel_icon, views, view_growth)
+                         VALUES ($1,$2,$3,$4,0,$5)`,
+                        [videoId, videoTitle, user, icon, vg]
+                    );
+
+                    message = `${prefix} @${user} posted "${videoTitle}" (+${g} growth)`;
+                } else {
+                    return res.send(`Unknown command: !${cmd}`);
+                }
             }
         }
+
+        res.send(message);
+    } catch (e) {
+        console.error('Command error:', e.message);
+        res.send('Server error. Please try again.');
     }
-
-    saveData(data);
-    res.send(message);
 });
 
-// ── チャンネルランキング API ──
-app.get('/api/ranking', (_req, res) => {
-    const data = readData();
-    res.json({ ranking: buildSortedChannels(data) });
+// ── API: ranking ─────────────────────────────────────
+app.get('/api/ranking', async (_req, res) => {
+    try {
+        const channels = await getAllChannels();
+        res.json({ ranking: buildSortedChannels(channels) });
+    } catch (e) {
+        res.status(500).json({ ranking: [] });
+    }
 });
 
-// ── 合計統計 API ──
-app.get('/api/total-stats', (_req, res) => {
-    const data = readData();
-    const totalSubs  = data.channels.reduce((sum, u) => sum + (u.subs  || 0), 0);
-    const totalViews = data.channels.reduce((sum, u) => sum + (u.views || 0), 0);
-    const sorted = [...data.channels].sort((a, b) => b.subs - a.subs);
-    res.json({ totalSubs, totalViews, count: data.channels.length, ranking: sorted });
+// ── API: total-stats ─────────────────────────────────
+app.get('/api/total-stats', async (_req, res) => {
+    try {
+        const channels   = await getAllChannels();
+        const totalSubs  = channels.reduce((s, u) => s + (u.subs  || 0), 0);
+        const totalViews = channels.reduce((s, u) => s + (u.views || 0), 0);
+        const sorted     = [...channels].sort((a, b) => b.subs - a.subs);
+        res.json({ totalSubs, totalViews, count: channels.length, ranking: sorted });
+    } catch (e) {
+        res.status(500).json({ totalSubs: 0, totalViews: 0, count: 0, ranking: [] });
+    }
 });
 
-// ── 最速成長 API ──
-app.get('/api/fastest-growth', (_req, res) => {
-    const data = readData();
-    const sorted = [...data.channels]
-        .map(u => ({ ...u, growthPerHr: u.growth || 0 }))
-        .sort((a, b) => b.growthPerHr - a.growthPerHr)
-        .slice(0, 50);
-    res.json({ channels: sorted });
+// ── API: fastest-growth ──────────────────────────────
+app.get('/api/fastest-growth', async (_req, res) => {
+    try {
+        const channels = await getAllChannels();
+        const sorted = [...channels]
+            .map(u => ({ ...u, growthPerHr: u.growth || 0 }))
+            .sort((a, b) => b.growthPerHr - a.growthPerHr)
+            .slice(0, 50);
+        res.json({ channels: sorted });
+    } catch (e) {
+        res.status(500).json({ channels: [] });
+    }
 });
 
-// ── 動画TOP50 API ──
-app.get('/api/video-top50', (_req, res) => {
-    const data = readData();
-    const sorted = [...data.videos]
-        .sort((a, b) => b.views - a.views)
-        .slice(0, 50);
-    res.json({ videos: sorted });
+// ── API: video-top50 ─────────────────────────────────
+app.get('/api/video-top50', async (_req, res) => {
+    try {
+        const videos = await getAllVideos();
+        const sorted = [...videos].sort((a, b) => b.views - a.views).slice(0, 50);
+        res.json({ videos: sorted });
+    } catch (e) {
+        res.status(500).json({ videos: [] });
+    }
 });
 
-// ── YouTube Stats proxy (変更なし) ──
+// ── API: YouTube Stats proxy ─────────────────────────
 app.get('/api/stats/channel', async (req, res) => {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id' });
-    if (YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE')
-        return res.json({ error: 'API key not set', name:id, thumbnail:'', subscribers:0, views:0, likes:0, watching:0, isLive:false });
+    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE')
+        return res.json({ error:'API key not set', name:id, thumbnail:'', subscribers:0, views:0, likes:0, watching:0, isLive:false });
 
     try {
         const chRes  = await fetchFn(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(id)}&key=${YOUTUBE_API_KEY}`);
@@ -265,14 +329,19 @@ app.get('/api/stats/channel', async (req, res) => {
             name: snippet.title || id, thumbnail: thumb,
             subscribers: parseInt(stats.subscriberCount||0),
             totalViews:  parseInt(stats.viewCount||0),
-            likes, watching,
-            liveViews,
-            isLive
+            likes, watching, liveViews, isLive
         });
     } catch (e) {
         res.json({ error:e.message, name:id, thumbnail:'', subscribers:0, totalViews:0, likes:0, watching:0, liveViews:0, isLive:false });
     }
 });
 
+// ── Static files & Start ─────────────────────────────
 app.use(express.static('.'));
-app.listen(PORT, () => console.log(`✅ FYSC Server → http://localhost:${PORT}`));
+
+initDB().then(() => {
+    app.listen(PORT, () => console.log(`FYSC Server running on port ${PORT}`));
+}).catch(e => {
+    console.error('DB init failed:', e.message);
+    process.exit(1);
+});
