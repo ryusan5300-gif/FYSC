@@ -377,7 +377,9 @@ app.get('/api/stats/channel', async (req, res) => {
 
 
 // ── Static files ─────────────────────────────────────
-app.use(express.static('.'));
+// ルートパスで静的ファイルを提供（/streamer/ 配下からでも /Default_icon.jpg が取れるよう両方登録）
+app.use(express.static(path.join(__dirname)));
+app.use('/streamer', express.static(path.join(__dirname)));
 
 initDB().then(() => {
     app.listen(PORT, () => console.log(`FYSC Server running on port ${PORT}`));
