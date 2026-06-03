@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>FYSC Video View TOP50</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/themes/odometer-theme-minimal.min.css" />
+    <script>window.odometerOptions={auto:false,format:'(,ddd)',theme:'minimal',duration:2000};</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/odometer.min.js"></script>
+    <style>
+        body{background:#0a0a2a;color:#fff;font-family:'Roboto','Arial',sans-serif;margin:0;padding:0;overflow-x:hidden;}
+        #loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,10,42,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;transition:opacity 0.5s ease;color:#fff;}
+        .spinner{width:50px;height:50px;border:5px solid rgba(255,255,255,0.1);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:10px;}
+        @keyframes spin{to{transform:rotate(360deg);}}
+        .grid-container{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:15px;opacity:0;transition:opacity 0.5s ease;}
+        .column{display:flex;flex-direction:column;gap:6px;}
+        .rank-item{background:rgba(253,253,253,0.9);color:#000;padding:8px;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);display:flex;align-items:center;font-size:0.9em;visibility:hidden;opacity:0;transform:scale(0.85);transition:visibility 0s 0.4s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
+        .rank-item.show{visibility:visible;opacity:1;transform:scale(1);transition:visibility 0s 0s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
+        .rank-item.empty{display:none!important;}
+        .rank-number-wrap{position:relative;width:46px;height:46px;flex-shrink:0;margin-right:10px;display:flex;align-items:center;justify-content:center;}
+        .rank-number{font-size:1.5em;font-weight:900;color:#000;position:relative;z-index:1;line-height:1;text-shadow:0 0 3px #fff,0 0 6px #fff,1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;}
+        .icon-container{width:50px;height:50px;flex-shrink:0;margin-right:10px;overflow:hidden;background:#ddd;border-radius:0;}
+        .channel-icon{width:100%;height:100%;object-fit:cover;display:block;}
+        .info-container{display:flex;flex-direction:column;flex-grow:1;overflow:hidden;}
+        .video-title{font-size:1.1em;font-weight:700;color:#000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;}
+        .channel-name{font-size:0.8em;color:#555;margin-bottom:3px;}
+        .views{color:#000;font-size:1.5em;font-weight:700;}
+        .up{color:#00aa00!important;}
+        .down{color:#cc0000!important;}
+    </style>
+</head>
+<body>
+    <div id="loading-screen"><div class="spinner"></div><div>Loading Videos...</div></div>
+    <div class="grid-container" id="board"></div>
+    <script>
+    const DEF='Default_icon.jpg';
+    let odometers={},currentValues={};
+    let isInit=false,pendingData=null;
+
+    function initBoard(){
+        const board=document.getElementById('board');board.innerHTML='';
+        for(let i=0;i<5;i++){
+            const col=document.createElement('div');col.className='column';
+            for(let j=0;j<10;j++){
+                const idx=i*10+j;const item=document.createElement('div');
+                item.className='rank-item';item.id='item-'+idx;
+                item.innerHTML=
+                    '<div class="rank-number-wrap">'+
+                        '<div class="rank-number" id="rank-'+idx+'">--</div>'+
+                    '</div>'+
+                    '<div class="icon-container"><img src="'+DEF+'" class="channel-icon" id="icon-'+idx+'" onerror="this.src=\''+DEF+'\'"></div>'+
+                    '<div class="info-container">'+
+                        '<div class="video-title" id="title-'+idx+'">---</div>'+
+                        '<div class="channel-name" id="ch-'+idx+'">---</div>'+
+                        '<div class="views" id="odo-'+idx+'">0</div>'+
+                    '</div>';
+                col.appendChild(item);
+            }
+            board.appendChild(col);
+        }
+    }
+
+    function initOdo(idx){
+        if(odometers[idx])return odometers[idx];
+        const el=document.getElementById('odo-'+idx);if(!el)return null;
+        el.classList.add('odometer');
+        const odo=new Odometer({el,value:0,format:'(,ddd)',theme:'minimal',duration:2000});
+        odo.render();odometers[idx]=odo;currentValues[idx]=0;return odo;
+    }
+
+    function applyIdx(idx,video){
+        const item=document.getElementById('item-'+idx);
+        if(!item)return;
+        if(!video||video.title==='---'){
+            item.classList.add('empty');
+            return;
+        }
+        item.classList.remove('empty');
+        document.getElementById('rank-'+idx).innerText=idx+1;
+        const icon=video.channelIcon||DEF;
+        document.getElementById('icon-'+idx).src=icon;
+        document.getElementById('title-'+idx).innerText=video.title;
+        document.getElementById('ch-'+idx).innerText=video.channelName||'';
+        const odo=initOdo(idx);if(!odo)return;
+        const prev=currentValues[idx]||0,nv=video.views;
+        if(nv!==prev){
+            const odoEl=document.getElementById('odo-'+idx);
+            odoEl.classList.remove('up','down');
+            odoEl.classList.add(nv>prev?'up':'down');
+            currentValues[idx]=nv;
+            odo.update(nv);
+            setTimeout(()=>odoEl?odoEl.classList.remove('up','down'):null,2200);
+        }
+    }
+
+    async function refreshData(){
+        try{
+            const r=await fetch('/api/video-top50');
+            const data=await r.json();
+            const videos=data.videos||[];
+            for(let i=0;i<50;i++){
+                applyIdx(i,videos[i]||null);
+            }
+        }catch(e){console.error('Video ranking fetch error:',e);}
+    }
+
+    async function initialLoad(){
+        const r=await fetch('/api/video-top50');
+        const {videos}=await r.json();
+        isInit=true;pendingData=videos;
+        const ls=document.getElementById('loading-screen');
+        const board=document.getElementById('board');
+        board.style.opacity='1';
+
+        for(let i=0;i<50;i++){
+            const v=videos[i]||null;
+            if(!v||v.title==='---')continue;
+            document.getElementById('rank-'+i).innerText=i+1;
+            document.getElementById('icon-'+i).src=v.channelIcon||DEF;
+            document.getElementById('title-'+i).innerText=v.title;
+            document.getElementById('ch-'+i).innerText=v.channelName||'';
+        }
+
+        let shown=0;
+        for(let i=0;i<50;i++){
+            const v=videos[i]||null;
+            if(!v||v.title==='---')continue;
+            const delay=shown*30;shown++;
+            setTimeout((idx)=>{
+                const item=document.getElementById('item-'+idx);if(!item)return;
+                item.classList.add('show');
+                setTimeout(()=>{
+                    const ud=pendingData[idx];
+                    if(!ud||ud.views===undefined)return;
+                    const odo=initOdo(idx);
+                    if(odo){currentValues[idx]=ud.views;odo.update(ud.views);}
+                },420);
+            },delay,i);
+        }
+        setTimeout(()=>{
+            ls.style.opacity='0';
+            setTimeout(()=>ls.style.display='none',500);
+        },shown*30+500);
+    }
+
+    initBoard();
+    requestAnimationFrame(()=>initialLoad());
+    setInterval(refreshData,5000);
+    </script>
+</body>
+</html>

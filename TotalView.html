@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>FYSC Total Views</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/themes/odometer-theme-minimal.min.css" />
+    <script>window.odometerOptions={auto:false,format:'(,ddd)',theme:'minimal',duration:2000};</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/odometer.min.js"></script>
+    <style>
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{background:#0d1b2a;color:#fff;font-family:'Roboto','Arial',sans-serif;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;}
+
+        .container{display:flex;flex-direction:column;align-items:center;gap:24px;}
+
+        .title-row{display:flex;align-items:center;gap:16px;}
+        .play-icon{font-size:3em;}
+        .title-text{font-size:2em;font-weight:900;letter-spacing:3px;color:#00ccff;text-transform:uppercase;text-shadow:0 0 20px rgba(0,204,255,0.5);}
+
+        .total-box{background:rgba(0,100,180,0.2);border:2px solid rgba(0,204,255,0.4);border-radius:8px;padding:32px 64px;display:flex;flex-direction:column;align-items:center;gap:12px;
+            box-shadow:0 0 40px rgba(0,204,255,0.15);}
+        .total-label{font-size:1em;font-weight:700;color:#aaa;letter-spacing:3px;text-transform:uppercase;}
+        .total-views-odo{font-size:4em;font-weight:900;color:#00ccff;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title-row">
+            <span class="play-icon">▶️</span>
+            <div class="title-text">TOTAL VIEWS</div>
+        </div>
+
+        <div class="total-box">
+            <div class="total-label">ALL CHANNELS COMBINED</div>
+            <div id="total-views-odo" class="total-views-odo odometer">0</div>
+            <div class="total-label" id="channel-count">— channels</div>
+        </div>
+    </div>
+
+    <script>
+    let odoInited=false,odo=null,prevTotal=0;
+
+    function fmt(n){return Number(n||0).toLocaleString();}
+
+    function initOdo(){
+        const el=document.getElementById('total-views-odo');
+        el.classList.add('odometer');
+        odo=new Odometer({el,value:0,format:'(,ddd)',theme:'minimal',duration:2000});
+        odo.render();
+        odoInited=true;
+    }
+
+    async function refresh(){
+        try{
+            const r=await fetch('/api/total-stats');
+            const d=await r.json();
+            if(!odoInited)initOdo();
+            const tv=d.totalViews||0;
+            if(tv!==prevTotal){odo.update(tv);prevTotal=tv;}
+            document.getElementById('channel-count').textContent=`${d.count||0} channels`;
+        }catch(e){console.error(e);}
+    }
+
+    refresh();
+    setInterval(refresh,5000);
+    </script>
+</body>
+</html>

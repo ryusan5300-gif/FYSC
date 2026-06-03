@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>FYSC Fastest Growth</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/themes/odometer-theme-minimal.min.css" />
+    <script>window.odometerOptions={auto:false,format:'(,ddd)',theme:'minimal',duration:2000};</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/odometer.min.js"></script>
+    <style>
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{background:#0a1a0a;color:#fff;font-family:'Roboto','Arial',sans-serif;margin:0;padding:0;overflow-x:hidden;}
+
+        .header{background:rgba(0,80,0,0.6);border-bottom:2px solid rgba(0,255,80,0.3);padding:14px 24px;display:flex;align-items:center;gap:16px;}
+        .header-icon{font-size:2em;}
+        .header-title{font-size:1.6em;font-weight:900;color:#00ff50;letter-spacing:3px;text-transform:uppercase;text-shadow:0 0 12px rgba(0,255,80,0.6);}
+        .header-sub{font-size:0.85em;color:#aaa;letter-spacing:1px;margin-left:auto;}
+
+        .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:12px;}
+        .column{display:flex;flex-direction:column;gap:6px;}
+
+        .growth-card{background:rgba(0,40,0,0.8);border:1px solid rgba(0,255,80,0.15);border-radius:4px;padding:10px 12px;display:flex;align-items:center;gap:10px;
+            transition:border-color 0.3s,box-shadow 0.3s;}
+        .growth-card.hot{border-color:rgba(255,200,0,0.6);box-shadow:0 0 12px rgba(255,200,0,0.2);}
+        .growth-card.fire{border-color:rgba(255,80,0,0.6);box-shadow:0 0 16px rgba(255,80,0,0.3);}
+
+        .rank-number-wrap{position:relative;width:38px;height:38px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+        .rank-effect{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:46px;height:46px;object-fit:contain;pointer-events:none;z-index:0;}
+        .rank-number{font-size:0.9em;font-weight:900;color:#000;position:relative;z-index:1;line-height:1;
+            text-shadow:0 0 3px #fff,1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;}
+
+        .card-icon{width:40px;height:40px;border-radius:0;object-fit:cover;flex-shrink:0;background:#333;}
+        .card-info{flex:1;min-width:0;}
+        .card-name{font-size:0.85em;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eee;margin-bottom:4px;}
+
+        .growth-bar-wrap{height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;margin-bottom:4px;}
+        .growth-bar{height:100%;border-radius:3px;transition:width 1s ease;}
+
+        .card-stats{display:flex;justify-content:space-between;align-items:center;}
+        .growth-value{font-size:0.9em;font-weight:900;color:#00ff50;}
+        .subs-value{font-size:0.78em;color:#888;}
+
+        .no-growth{display:flex;align-items:center;justify-content:center;color:#444;font-size:0.85em;padding:20px;border:1px dashed #333;border-radius:4px;text-align:center;}
+
+        .legend{padding:8px 24px;display:flex;gap:20px;font-size:0.8em;color:#888;border-top:1px solid rgba(255,255,255,0.05);}
+        .legend-item{display:flex;align-items:center;gap:6px;}
+        .legend-dot{width:10px;height:10px;border-radius:50%;}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="header-icon">📈</span>
+        <div class="header-title">FASTEST GROWTH CHANNELS</div>
+        <div class="header-sub">Per Hour (Pending Growth)</div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#ff5000;"></div> 🔥 Very Hot (500+/hr)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffc800;"></div> ⭐ Hot (100+/hr)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00ff50;"></div> 📈 Growing</div>
+    </div>
+
+    <script>
+    const EFFECTS=[
+        {threshold:100000,src:'rainring.gif'},{threshold:70000,src:'rainbow.gif'},
+        {threshold:50000,src:'purple_fire.gif'},{threshold:35000,src:'blue_fire.gif'},
+        {threshold:20000,src:'green_fire.gif'},{threshold:10000,src:'red_fire.gif'},
+        {threshold:5000,src:'yellow_fire.gif'},{threshold:3500,src:'redfirefixed.gif'},
+        {threshold:2000,src:'orangefirefixed.gif'},{threshold:1500,src:'Full_Bar.png'},
+        {threshold:1000,src:'Half_Bar.png'},
+    ];
+    function getEffectSrc(s){for(const e of EFFECTS)if(s>=e.threshold)return e.src;return null;}
+
+    const DEF='Default_icon.jpg';
+    function fmt(n){return Number(n||0).toLocaleString();}
+    function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+    function cardClass(g){
+        if(g>=500)return'growth-card fire';
+        if(g>=100)return'growth-card hot';
+        return'growth-card';
+    }
+    function barColor(g){
+        if(g>=500)return'#ff5000';
+        if(g>=100)return'#ffc800';
+        return'#00ff50';
+    }
+    function barLabel(g){
+        if(g>=500)return'🔥';
+        if(g>=100)return'⭐';
+        return'📈';
+    }
+
+    function renderGrid(channels){
+        const grid=document.getElementById('grid');
+        const cols=[];
+        for(let i=0;i<5;i++){
+            const col=document.createElement('div');
+            col.className='column';
+            cols.push(col);
+        }
+
+        const top=channels.slice(0,50);
+        const maxG=Math.max(1,...top.map(u=>u.growthPerHr||0));
+
+        top.forEach((u,i)=>{
+            const g=u.growthPerHr||0;
+            // ★ エフェクト基準を growthPerHr に変更
+            const effectSrc=getEffectSrc(g);
+            const barW=Math.max(0,Math.min(100,Math.round((g/maxG)*100)));
+            const colIdx=Math.floor(i/10);
+            const card=document.createElement('div');
+            card.className=cardClass(g);
+            card.innerHTML=`
+                <div class="rank-number-wrap">
+                    ${effectSrc?`<img class="rank-effect" src="${effectSrc}" alt="">`:''}
+                    <div class="rank-number">#${i+1}</div>
+                </div>
+                <img class="card-icon" src="${u.icon||DEF}" onerror="this.src='${DEF}'" alt="">
+                <div class="card-info">
+                    <div class="card-name">${barLabel(g)} ${escHtml(u.name)}</div>
+                    <div class="growth-bar-wrap">
+                        <div class="growth-bar" style="width:${barW}%;background:${barColor(g)};"></div>
+                    </div>
+                    <div class="card-stats">
+                        <span class="growth-value">+${fmt(g)}/hr</span>
+                        <span class="subs-value">📺${fmt(u.subs||0)}</span>
+                    </div>
+                </div>
+            `;
+            if(colIdx<5)cols[colIdx].appendChild(card);
+        });
+
+        grid.innerHTML='';
+        cols.forEach(c=>grid.appendChild(c));
+    }
+
+    async function refresh(){
+        try{
+            const r=await fetch('/api/fastest-growth');
+            const d=await r.json();
+            renderGrid(d.channels||[]);
+        }catch(e){console.error(e);}
+    }
+
+    refresh();
+    setInterval(refresh,5000);
+    </script>
+</body>
+</html>

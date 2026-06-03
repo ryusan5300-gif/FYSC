@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>FYSC Subscriber Battle</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/themes/odometer-theme-minimal.min.css" />
+    <script>window.odometerOptions={auto:false,format:'(,ddd)',theme:'minimal',duration:2000};</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/odometer.min.js"></script>
+    <style>
+        *{box-sizing:border-box;}
+        body{background:#3a1f6e;color:#fff;font-family:'Roboto','Arial',sans-serif;margin:0;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;overflow:hidden;}
+        #loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,71,171,0.9);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;transition:opacity 0.5s ease;color:#fff;}
+        .spinner{width:50px;height:50px;border:5px solid rgba(255,255,255,0.1);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:10px;}
+        @keyframes spin{to{transform:rotate(360deg);}}
+
+        .battle-row{display:flex;align-items:stretch;justify-content:center;width:98%;max-width:1400px;background:#4a2880;border-radius:0;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.5);}
+
+        .channel-card{display:flex;align-items:center;flex:1;padding:18px 20px;gap:16px;min-width:0;}
+        .channel-card.right{flex-direction:row-reverse;}
+        .channel-card.right .channel-info{text-align:left;align-items:flex-start;}
+
+        .rank-number-wrap{position:relative;width:46px;height:46px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+        .rank-effect{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:56px;height:56px;object-fit:contain;pointer-events:none;z-index:0;}
+        .rank-number{font-size:1.5em;font-weight:900;color:#000;position:relative;z-index:1;line-height:1;
+            text-shadow:0 0 3px #fff,0 0 6px #fff,1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;}
+
+        .icon-box{width:90px;height:90px;flex-shrink:0;overflow:hidden;background:#555;border-radius:0;}
+        .icon-box img{width:100%;height:100%;object-fit:cover;display:block;border-radius:0;}
+
+        .channel-info{flex:1;min-width:0;display:flex;flex-direction:column;}
+        .ch-name{font-size:1.6em;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;}
+        .ch-subs{font-size:2.6em;font-weight:700;}
+
+        .gap-center{flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px 32px;background:#5c35a0;min-width:180px;}
+        .gap-label{font-size:1em;font-weight:700;color:#ccc;letter-spacing:1px;margin-bottom:6px;}
+        .gap-count{font-size:2.4em;font-weight:700;}
+
+        .up{color:#00dd00!important;}
+        .down{color:#ff4444!important;}
+    </style>
+</head>
+<body>
+    <div id="loading-screen"><div class="spinner"></div><div>Loading...</div></div>
+
+    <div class="battle-row">
+        <div class="channel-card left">
+            <div class="rank-number-wrap">
+                <img class="rank-effect" id="effect-0" src="" style="display:none;" alt="">
+                <div class="rank-number" id="rank-0">--</div>
+            </div>
+            <div class="icon-box"><img id="icon-0" src="Default_icon.jpg" onerror="this.src='Default_icon.jpg'"></div>
+            <div class="channel-info">
+                <div class="ch-name" id="name-0">---</div>
+                <div class="ch-subs" id="odo-0">0</div>
+            </div>
+        </div>
+
+        <div class="gap-center">
+            <div class="gap-label">SUB GAP</div>
+            <div class="gap-count" id="odo-gap">0</div>
+        </div>
+
+        <div class="channel-card right">
+            <div class="channel-info">
+                <div class="ch-name" id="name-1">---</div>
+                <div class="ch-subs" id="odo-1">0</div>
+            </div>
+            <div class="icon-box"><img id="icon-1" src="Default_icon.jpg" onerror="this.src='Default_icon.jpg'"></div>
+            <div class="rank-number-wrap">
+                <img class="rank-effect" id="effect-1" src="" style="display:none;" alt="">
+                <div class="rank-number" id="rank-1">--</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const EFFECTS=[
+        {threshold:100000,src:'rainring.gif'},{threshold:70000,src:'rainbow.gif'},
+        {threshold:50000,src:'purple_fire.gif'},{threshold:35000,src:'blue_fire.gif'},
+        {threshold:20000,src:'green_fire.gif'},{threshold:10000,src:'red_fire.gif'},
+        {threshold:5000,src:'yellow_fire.gif'},{threshold:3500,src:'redfirefixed.gif'},
+        {threshold:2000,src:'orangefirefixed.gif'},{threshold:1500,src:'Full_Bar.png'},
+        {threshold:1000,src:'Half_Bar.png'},
+    ];
+    function getEffectSrc(s){for(const e of EFFECTS)if(s>=e.threshold)return e.src;return null;}
+
+    let odometers={},currentValues={};
+    const DEF='Default_icon.jpg';
+    let knownVersion=null;
+
+    function updateEffect(id, growthVal){
+        const el=document.getElementById('effect-'+id);if(!el)return;
+        const src=getEffectSrc(growthVal);
+        if(src){if(el.getAttribute('src')!==src)el.src=src;el.style.display='block';}
+        else{el.style.display='none';el.removeAttribute('src');}
+    }
+    function initOdo(id){
+        if(odometers[id])return odometers[id];
+        const el=document.getElementById('odo-'+id);if(!el)return null;
+        el.classList.add('odometer');
+        const odo=new Odometer({el,value:0,format:'(,ddd)',theme:'minimal',duration:2000});
+        odo.render();odometers[id]=odo;currentValues[id]=0;return odo;
+    }
+    function updateOdo(id,nv){
+        const el=document.getElementById('odo-'+id);
+        const odo=initOdo(id);if(!odo||!el)return;
+        const prev=currentValues[id]||0;if(nv===prev)return;
+        el.classList.remove('up','down');
+        el.classList.add(nv>prev?'up':'down');
+        currentValues[id]=nv;odo.update(nv);
+        setTimeout(()=>el.classList.remove('up','down'),2200);
+    }
+
+    async function updateBattle(){
+        try{
+            const r=await fetch('/api/ranking');
+            const {ranking}=await r.json();
+            if(!ranking||ranking.length<2)return;
+            let minGap=Infinity,pair=[ranking[0],ranking[1]],pairIdx=[0,1];
+            for(let i=0;i<ranking.length-1;i++){
+                const gap=Math.abs(ranking[i].subs-ranking[i+1].subs);
+                if(gap<minGap){minGap=gap;pair=[ranking[i],ranking[i+1]];pairIdx=[i,i+1];}
+            }
+            pair.forEach((user,side)=>{
+                const rEl=document.getElementById('rank-'+side);
+                const nEl=document.getElementById('name-'+side);
+                const iEl=document.getElementById('icon-'+side);
+                if(rEl)rEl.innerText='#'+(pairIdx[side]+1);
+                if(nEl)nEl.innerText=user.name;
+                if(iEl)iEl.src=(user.icon&&user.icon!=='')?user.icon:DEF;
+                // ★ エフェクト基準を growth に変更
+                updateEffect(side, user.growth || 0);
+                updateOdo(side, user.subs);
+            });
+            updateOdo('gap',minGap);
+        }catch(e){console.error('Battle update failed',e);}
+    }
+
+    async function pollVersion(){
+        try{
+            const r=await fetch('/api/ranking-version');
+            const {version}=await r.json();
+            if(knownVersion!==null&&version!==knownVersion){location.reload();}
+            knownVersion=version;
+        }catch(e){}
+    }
+
+    requestAnimationFrame(async()=>{
+        await updateBattle();
+        const ls=document.getElementById('loading-screen');
+        ls.style.opacity='0';setTimeout(()=>ls.style.display='none',500);
+        try{const r=await fetch('/api/ranking-version');const {version}=await r.json();knownVersion=version;}catch(e){}
+        setInterval(updateBattle,3000);
+        setInterval(pollVersion,3000);
+    });
+    </script>
+</body>
+</html>

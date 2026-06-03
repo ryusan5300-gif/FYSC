@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>FYSC Channel Stats</title>
+    <style>
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{background:#1a0a3a;color:#fff;font-family:'Roboto','Arial',sans-serif;height:100vh;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;}
+
+        /* ── チャンネル入力 + アイコン + 情報 ── */
+        .channel-strip{background:rgba(40,15,80,0.97);display:flex;align-items:center;gap:16px;padding:10px 24px;border-top:1px solid rgba(255,255,255,0.08);}
+        .ch-icon{width:56px;height:56px;border-radius:0;object-fit:cover;flex-shrink:0;background:#333;}
+        .ch-details{flex:1;min-width:0;}
+        .ch-name-row{font-size:1.3em;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .ch-sub-row{font-size:0.95em;color:#aaa;margin-top:2px;}
+        .ch-sub-row span{color:#fff;font-weight:700;}
+        .ch-live-badge{display:inline-block;background:#ff0000;color:#fff;font-size:0.7em;font-weight:900;padding:2px 7px;border-radius:3px;margin-left:8px;vertical-align:middle;letter-spacing:1px;}
+        .ch-input-row{display:flex;gap:8px;align-items:center;}
+        .ch-input{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#fff;padding:6px 12px;border-radius:4px;font-size:0.95em;width:220px;outline:none;}
+        .ch-input::placeholder{color:rgba(255,255,255,0.4);}
+        .ch-btn{background:#5c35a0;border:none;color:#fff;padding:6px 16px;border-radius:4px;font-size:0.9em;font-weight:700;cursor:pointer;transition:background 0.2s;}
+        .ch-btn:hover{background:#7a4dca;}
+
+        /* ── Stats bar ── */
+        .stats-bar{background:rgba(30,10,60,0.95);border-top:2px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;gap:32px;padding:10px 32px;font-weight:700;}
+        .stat-item{display:flex;flex-direction:column;align-items:center;gap:2px;}
+        .stat-value{color:#fff;font-size:1.25em;font-weight:900;}
+        .stat-label{color:#aaa;font-size:0.78em;letter-spacing:1px;text-align:center;}
+        .stat-sublabel{color:#666;font-size:0.68em;letter-spacing:0.5px;text-align:center;}
+        .stat-divider{color:rgba(255,255,255,0.25);font-size:1.4em;}
+        .live-only{color:#888;font-size:0.82em;font-style:italic;}
+
+        /* ── Ticker ── */
+        .ticker-bar{background:rgba(20,5,50,0.98);border-top:1px solid rgba(255,255,255,0.08);padding:7px 0;overflow:hidden;position:relative;}
+        .ticker-outer{display:flex;width:100%;overflow:hidden;}
+        .ticker-track{display:flex;flex-shrink:0;white-space:nowrap;animation:tickerScroll 40s linear infinite;}
+        @keyframes tickerScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+        .ticker-item{display:inline-flex;align-items:center;gap:6px;padding:0 48px 0 0;font-size:0.95em;font-weight:700;color:#ccc;}
+        .ticker-item .fire{color:#ff6600;}
+        .ticker-item .t-rank{color:#fff;font-weight:900;}
+        .ticker-item .t-name{color:#fff;font-weight:900;text-transform:uppercase;}
+        .ticker-item .t-gain{color:#ff9900;font-weight:900;}
+        .ticker-item .t-top{color:#ffdd00;font-weight:900;}
+    </style>
+</head>
+<body>
+    <!-- チャンネル情報 -->
+    <div class="channel-strip">
+        <img class="ch-icon" id="ch-icon" src="Default_icon.jpg" alt="icon" onerror="this.src='Default_icon.jpg'">
+        <div class="ch-details">
+            <div class="ch-name-row" id="ch-name">---<span class="ch-live-badge" id="live-badge" style="display:none;">LIVE</span></div>
+            <div class="ch-sub-row">Subscribers: <span id="ch-subs">---</span></div>
+        </div>
+        <div class="ch-input-row">
+            <input class="ch-input" id="ch-input" type="text" placeholder="Channel ID (UCxxxxxxxx)">
+            <button class="ch-btn" onclick="loadChannel()">Load</button>
+        </div>
+    </div>
+
+    <!-- Stats bar -->
+    <!-- WATCHING NOW = ライブ同時視聴者数, LIKES = ライブ高評価数, VIEWS = ライブ再生回数 -->
+    <div class="stats-bar">
+        <div class="stat-item">
+            <span class="stat-value" id="stat-watching">---</span>
+            <span class="stat-label">👁️ WATCHING NOW</span>
+            <span class="stat-sublabel">Live Concurrent Viewers</span>
+        </div>
+        <div class="stat-divider">|</div>
+        <div class="stat-item">
+            <span class="stat-value" id="stat-likes">---</span>
+            <span class="stat-label">👍 LIKES</span>
+            <span class="stat-sublabel">Live Stream Likes</span>
+        </div>
+        <div class="stat-divider">|</div>
+        <div class="stat-item">
+            <span class="stat-value" id="stat-views">---</span>
+            <span class="stat-label">▶️ VIEWS</span>
+            <span class="stat-sublabel">Live Stream Views</span>
+        </div>
+        <div class="stat-divider">|</div>
+        <div class="stat-item">
+            <span class="stat-value" id="stat-total-views">---</span>
+            <span class="stat-label">📊 TOTAL VIEWS</span>
+            <span class="stat-sublabel">Channel All-Time Views</span>
+        </div>
+    </div>
+
+    <!-- Ticker -->
+    <div class="ticker-bar">
+        <div class="ticker-outer">
+            <div class="ticker-track" id="ticker-track"></div>
+        </div>
+    </div>
+
+    <script>
+    function fmt(n){if(n===null||n===undefined||isNaN(n))return'---';return Number(n).toLocaleString();}
+
+    let currentChannelId=null;
+
+    async function fetchStats(id){
+        try{
+            const r=await fetch('/api/stats/channel?id='+encodeURIComponent(id));
+            if(!r.ok)throw new Error('HTTP '+r.status);
+            return await r.json();
+        }catch(e){console.error('Stats fetch:',e);return null;}
+    }
+
+    async function loadChannel(){
+        const v=document.getElementById('ch-input').value.trim();
+        if(!v)return;
+        currentChannelId=v;
+        await refreshStats();
+    }
+
+    async function refreshStats(){
+        if(!currentChannelId)return;
+        const d=await fetchStats(currentChannelId);
+        if(!d)return;
+
+        document.getElementById('ch-name').childNodes[0].nodeValue=d.name||currentChannelId;
+        document.getElementById('ch-subs').textContent=fmt(d.subscribers);
+        document.getElementById('ch-icon').src=d.thumbnail||'Default_icon.jpg';
+        document.getElementById('stat-total-views').textContent=fmt(d.totalViews);
+
+        const liveBadge=document.getElementById('live-badge');
+        if(d.isLive){
+            liveBadge.style.display='inline-block';
+            // ライブ配信の同時視聴者数
+            document.getElementById('stat-watching').textContent=fmt(d.watching);
+            // ライブ配信の高評価数
+            document.getElementById('stat-likes').textContent=fmt(d.likes);
+            // ライブ配信の再生回数
+            document.getElementById('stat-views').textContent=fmt(d.liveViews);
+        }else{
+            liveBadge.style.display='none';
+            document.getElementById('stat-watching').textContent='---';
+            document.getElementById('stat-likes').textContent='---';
+            document.getElementById('stat-views').textContent='---';
+        }
+    }
+
+    // ── Ticker ──────────────────────────────────────────────
+    async function buildTicker(){
+        try{
+            const r=await fetch('/api/ranking');
+            const {ranking}=await r.json();
+            if(!ranking||!ranking.length)return;
+
+            const items=ranking.slice(0,10);
+
+            function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+            function makeHTML(u,i){
+                let h='<div class="ticker-item">'+
+                    '<span class="fire">🔥</span>'+
+                    '&nbsp;<span class="t-rank">#'+(i+1)+'</span>'+
+                    '&nbsp;<span class="t-name">'+escHtml(u.name.toUpperCase())+'</span>'+
+                    '&nbsp;GAINS&nbsp;<span class="t-gain">'+fmt(u.growth||0)+'</span>&nbsp;GROWTH.';
+                if(i===0)h+='&nbsp;<span class="t-top">🏆 #1 '+escHtml(u.name.toUpperCase())+'</span>';
+                h+='</div>';
+                return h;
+            }
+
+            let html='';
+            items.forEach((u,i)=>{html+=makeHTML(u,i);});
+            items.forEach((u,i)=>{html+=makeHTML(u,i);});
+
+            document.getElementById('ticker-track').innerHTML=html;
+        }catch(e){console.error('Ticker:',e);}
+    }
+
+    buildTicker();
+    setInterval(buildTicker,30000);
+    setInterval(refreshStats,30000);
+    </script>
+</body>
+</html>

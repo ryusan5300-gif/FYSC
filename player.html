@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FYSC - Check Your Sub Count</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/themes/odometer-theme-minimal.min.css" />
+    <script>window.odometerOptions={auto:false,format:'(,ddd)',theme:'minimal',duration:1500};</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/odometer.min.js"></script>
+    <style>
+        :root {
+            --blue: #0047AB;
+            --gold: #FFD700;
+            --silver: #C0C0C0;
+            --bronze: #CD7F32;
+            --white: #ffffff;
+            --gray: #8a9bb5;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #010b1f;
+            color: var(--white);
+            font-family: 'Noto Sans JP', 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0,71,171,0.07) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,71,171,0.07) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+        }
+        header {
+            width: 100%;
+            padding: 20px 32px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            border-bottom: 1px solid rgba(0,71,171,0.4);
+            position: relative;
+        }
+        .logo {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 3em;
+            letter-spacing: 6px;
+            color: var(--white);
+            line-height: 1;
+        }
+        .logo span { color: var(--gold); }
+        .subtitle {
+            font-size: 0.78em;
+            color: var(--gray);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+
+        /* Language switcher */
+        .lang-bar {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            justify-content: flex-end;
+            max-width: 220px;
+        }
+        .lang-btn {
+            background: rgba(0,71,171,0.15);
+            border: 1px solid rgba(0,71,171,0.35);
+            border-radius: 4px;
+            color: var(--gray);
+            font-size: 0.72em;
+            font-family: inherit;
+            padding: 3px 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            letter-spacing: 0.5px;
+        }
+        .lang-btn:hover { background: rgba(0,71,171,0.35); color: var(--white); }
+        .lang-btn.active { background: var(--blue); color: var(--white); border-color: var(--blue); }
+
+        .main {
+            width: 100%;
+            max-width: 560px;
+            padding: 32px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 28px;
+        }
+        .search-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+        .search-label { font-size: 0.78em; color: var(--gray); letter-spacing: 2px; text-transform: uppercase; }
+        .search-row { display: flex; gap: 10px; }
+        .search-input {
+            flex: 1;
+            background: rgba(0,71,171,0.15);
+            border: 1.5px solid rgba(0,71,171,0.5);
+            border-radius: 6px;
+            color: var(--white);
+            font-family: inherit;
+            font-size: 1em;
+            padding: 12px 16px;
+            outline: none;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .search-input::placeholder { color: rgba(255,255,255,0.3); }
+        .search-input:focus { border-color: var(--blue); background: rgba(0,71,171,0.25); }
+        .search-btn {
+            background: var(--blue);
+            border: none;
+            border-radius: 6px;
+            color: var(--white);
+            font-family: inherit;
+            font-size: 0.95em;
+            font-weight: 700;
+            padding: 12px 24px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            white-space: nowrap;
+            letter-spacing: 1px;
+        }
+        .search-btn:hover { background: #0057d0; }
+        .search-btn:active { transform: scale(0.97); }
+
+        #result { width: 100%; display: none; }
+        .result-card {
+            background: rgba(0,71,171,0.12);
+            border: 1.5px solid rgba(0,71,171,0.45);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .rank-band {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 24px 16px;
+            background: rgba(0,71,171,0.2);
+            border-bottom: 1px solid rgba(0,71,171,0.3);
+        }
+        .rank-inner { text-align: center; }
+        .rank-label { font-size: 0.72em; color: var(--gray); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+        .rank-num {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 5em;
+            line-height: 1;
+            color: var(--white);
+        }
+        .rank-num.gold   { color: var(--gold);   text-shadow: 0 0 24px rgba(255,215,0,0.45); }
+        .rank-num.silver { color: var(--silver);  text-shadow: 0 0 24px rgba(192,192,192,0.45); }
+        .rank-num.bronze { color: var(--bronze);  text-shadow: 0 0 24px rgba(205,127,50,0.45); }
+
+        .ch-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(0,71,171,0.2);
+        }
+        .ch-icon { width: 64px; height: 64px; object-fit: cover; flex-shrink: 0; background: #1a2a4a; }
+        .ch-details { flex: 1; min-width: 0; }
+        .ch-name {
+            font-size: 1.2em;
+            font-weight: 900;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 6px;
+        }
+        .ch-tag { font-size: 0.78em; color: var(--gray); letter-spacing: 0.5px; }
+
+        /* Subs + rate section */
+        .subs-section {
+            padding: 18px 24px 14px;
+            border-bottom: 1px solid rgba(0,71,171,0.2);
+        }
+        .subs-row {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .subs-label { font-size: 0.72em; color: var(--gray); letter-spacing: 2px; text-transform: uppercase; flex-shrink: 0; }
+        .subs-odo { font-size: 2.8em; font-weight: 900; color: var(--white); }
+
+        .rate-row {
+            display: flex;
+            gap: 24px;
+        }
+        .rate-item { display: flex; flex-direction: column; gap: 2px; }
+        .rate-value { font-size: 1.05em; font-weight: 700; color: #00dd88; }
+        .rate-label { font-size: 0.68em; color: var(--gray); letter-spacing: 1.5px; text-transform: uppercase; }
+
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: rgba(0,71,171,0.2);
+        }
+        .stat-cell {
+            background: rgba(1,11,31,0.6);
+            padding: 14px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .stat-cell-label { font-size: 0.68em; color: var(--gray); letter-spacing: 1.5px; text-transform: uppercase; }
+        .stat-cell-value { font-size: 1.15em; font-weight: 700; color: var(--white); }
+        .stat-cell-value.positive { color: #00dd88; }
+
+        #not-found { display: none; text-align: center; padding: 32px; color: var(--gray); }
+        .not-found-msg { font-size: 1em; margin-bottom: 8px; }
+        .not-found-hint { font-size: 0.82em; opacity: 0.7; }
+
+        .spinner-wrap { display: none; justify-content: center; padding: 32px; }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid rgba(0,71,171,0.3);
+            border-top-color: var(--blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeUp 0.3s ease forwards; }
+
+        footer {
+            margin-top: auto;
+            padding: 24px;
+            color: rgba(138,155,181,0.4);
+            font-size: 0.72em;
+            letter-spacing: 1px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <div class="logo">FY<span>S</span>C</div>
+    <div class="subtitle" id="lbl-subtitle">Faking Your Sub Count</div>
+    <div class="lang-bar" id="lang-bar"></div>
+</header>
+
+<div class="main">
+    <div class="search-wrap">
+        <div class="search-label" id="lbl-search-label">Channel Name</div>
+        <div class="search-row">
+            <input class="search-input" id="name-input" type="text" placeholder="@YourChannelName" autocomplete="off" spellcheck="false">
+            <button class="search-btn" id="btn-check" onclick="doSearch()">CHECK</button>
+        </div>
+    </div>
+
+    <div class="spinner-wrap" id="spinner"><div class="spinner"></div></div>
+
+    <div id="result">
+        <div class="result-card fade-in">
+            <div class="rank-band">
+                <div class="rank-inner">
+                    <div class="rank-label" id="lbl-rank">Current Rank</div>
+                    <div class="rank-num" id="rank-num">#--</div>
+                </div>
+            </div>
+            <div class="ch-info">
+                <img class="ch-icon" id="ch-icon" src="Default_icon.jpg" onerror="this.src='Default_icon.jpg'" alt="">
+                <div class="ch-details">
+                    <div class="ch-name" id="ch-name">---</div>
+                    <div class="ch-tag" id="ch-tag"></div>
+                </div>
+            </div>
+            <div class="subs-section">
+                <div class="subs-row">
+                    <div class="subs-label" id="lbl-subs">Subscribers</div>
+                    <div class="subs-odo odometer" id="subs-odo">0</div>
+                </div>
+                <div class="rate-row">
+                    <div class="rate-item">
+                        <div class="rate-value" id="rate-min">+0</div>
+                        <div class="rate-label" id="lbl-per-min">Per Minute</div>
+                    </div>
+                    <div class="rate-item">
+                        <div class="rate-value" id="rate-hr">+0</div>
+                        <div class="rate-label" id="lbl-per-hr">Per Hour</div>
+                    </div>
+                </div>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-cell">
+                    <div class="stat-cell-label" id="lbl-pending">Pending Growth</div>
+                    <div class="stat-cell-value positive" id="stat-growth">0</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="stat-cell-label" id="lbl-views">Total Views</div>
+                    <div class="stat-cell-value" id="stat-views">0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="not-found">
+        <div class="not-found-msg" id="not-found-msg">Channel not found.</div>
+        <div class="not-found-hint" id="not-found-hint">Use !add in the stream chat to register.</div>
+    </div>
+</div>
+
+<footer>FYSC — FAKING YOUR SUB COUNT</footer>
+
+<script>
+// ── i18n ──────────────────────────────────────────────
+const LANGS = {
+    en: {
+        name:'EN', subtitle:'Faking Your Sub Count',
+        searchLabel:'Channel Name', btnCheck:'CHECK',
+        rankLabel:'Current Rank', subsLabel:'Subscribers',
+        perMin:'Per Minute', perHr:'Per Hour',
+        pending:'Pending Growth', views:'Total Views',
+        champion:'RANK 1 CHAMPION',
+        gapTo:'to catch #', gapSuffix:'subs behind',
+        notFound:'Channel not found.',
+        notFoundHint:'Use !add in the stream chat to register.',
+        errMsg:'Something went wrong. Please try again.',
+        placeholder:'@YourChannelName'
+    },
+    ja: {
+        name:'JP', subtitle:'Faking Your Sub Count',
+        searchLabel:'チャンネル名', btnCheck:'CHECK',
+        rankLabel:'現在の順位', subsLabel:'登録者数',
+        perMin:'毎分', perHr:'毎時',
+        pending:'保留中の成長', views:'総視聴回数',
+        champion:'第1位チャンピオン',
+        gapTo:'#まであと', gapSuffix:'人',
+        notFound:'チャンネルが見つかりませんでした。',
+        notFoundHint:'配信チャットで !add を使って登録してください。',
+        errMsg:'エラーが発生しました。もう一度お試しください。',
+        placeholder:'@チャンネル名'
+    },
+    zh: {
+        name:'中文', subtitle:'Faking Your Sub Count',
+        searchLabel:'频道名称', btnCheck:'查询',
+        rankLabel:'当前排名', subsLabel:'订阅者',
+        perMin:'每分钟', perHr:'每小时',
+        pending:'待处理增长', views:'总观看次数',
+        champion:'第一名冠军',
+        gapTo:'距#还差', gapSuffix:'名订阅者',
+        notFound:'未找到该频道。',
+        notFoundHint:'请在直播聊天中使用 !add 注册。',
+        errMsg:'出现错误，请重试。',
+        placeholder:'@频道名称'
+    },
+    ru: {
+        name:'RU', subtitle:'Faking Your Sub Count',
+        searchLabel:'Имя канала', btnCheck:'ПРОВЕРИТЬ',
+        rankLabel:'Текущий ранг', subsLabel:'Подписчики',
+        perMin:'В минуту', perHr:'В час',
+        pending:'Отложенный рост', views:'Всего просмотров',
+        champion:'ЧЕМПИОН #1',
+        gapTo:'до #', gapSuffix:'подписчиков',
+        notFound:'Канал не найден.',
+        notFoundHint:'Используйте !add в чате трансляции для регистрации.',
+        errMsg:'Что-то пошло не так. Попробуйте снова.',
+        placeholder:'@ИмяКанала'
+    },
+    ko: {
+        name:'한국어', subtitle:'Faking Your Sub Count',
+        searchLabel:'채널 이름', btnCheck:'확인',
+        rankLabel:'현재 순위', subsLabel:'구독자 수',
+        perMin:'분당', perHr:'시간당',
+        pending:'대기 중인 성장', views:'총 조회수',
+        champion:'1위 챔피언',
+        gapTo:'#까지 남은 구독자', gapSuffix:'명',
+        notFound:'채널을 찾을 수 없습니다.',
+        notFoundHint:'스트림 채팅에서 !add 를 사용하여 등록하세요.',
+        errMsg:'오류가 발생했습니다. 다시 시도해주세요.',
+        placeholder:'@채널이름'
+    },
+    es: {
+        name:'ES', subtitle:'Faking Your Sub Count',
+        searchLabel:'Nombre del canal', btnCheck:'BUSCAR',
+        rankLabel:'Rango actual', subsLabel:'Suscriptores',
+        perMin:'Por minuto', perHr:'Por hora',
+        pending:'Crecimiento pendiente', views:'Vistas totales',
+        champion:'CAMPEON #1',
+        gapTo:'faltan para #', gapSuffix:'subs',
+        notFound:'Canal no encontrado.',
+        notFoundHint:'Usa !add en el chat del stream para registrarte.',
+        errMsg:'Algo salio mal. Intenta de nuevo.',
+        placeholder:'@NombreDelCanal'
+    },
+    it: {
+        name:'IT', subtitle:'Faking Your Sub Count',
+        searchLabel:'Nome canale', btnCheck:'CERCA',
+        rankLabel:'Classifica attuale', subsLabel:'Iscritti',
+        perMin:'Al minuto', perHr:'All\'ora',
+        pending:'Crescita in sospeso', views:'Visualizzazioni totali',
+        champion:'CAMPIONE N.1',
+        gapTo:'mancano a #', gapSuffix:'iscritti',
+        notFound:'Canale non trovato.',
+        notFoundHint:'Usa !add nella chat dello stream per registrarti.',
+        errMsg:'Qualcosa e andato storto. Riprova.',
+        placeholder:'@NomeCanale'
+    },
+    fr: {
+        name:'FR', subtitle:'Faking Your Sub Count',
+        searchLabel:'Nom de la chaine', btnCheck:'CHERCHER',
+        rankLabel:'Classement actuel', subsLabel:'Abonnes',
+        perMin:'Par minute', perHr:'Par heure',
+        pending:'Croissance en attente', views:'Vues totales',
+        champion:'CHAMPION N.1',
+        gapTo:'il manque pour #', gapSuffix:'abonnes',
+        notFound:'Chaine introuvable.',
+        notFoundHint:'Utilisez !add dans le chat du stream pour vous inscrire.',
+        errMsg:'Une erreur est survenue. Reessayez.',
+        placeholder:'@NomDeLaChaine'
+    },
+    pt: {
+        name:'PT', subtitle:'Faking Your Sub Count',
+        searchLabel:'Nome do canal', btnCheck:'BUSCAR',
+        rankLabel:'Classificacao atual', subsLabel:'Inscritos',
+        perMin:'Por minuto', perHr:'Por hora',
+        pending:'Crescimento pendente', views:'Visualizacoes totais',
+        champion:'CAMPIAO #1',
+        gapTo:'faltam para #', gapSuffix:'inscritos',
+        notFound:'Canal nao encontrado.',
+        notFoundHint:'Use !add no chat da transmissao para se registrar.',
+        errMsg:'Algo deu errado. Tente novamente.',
+        placeholder:'@NomeDoCanal'
+    },
+};
+
+let currentLang = 'en';
+
+function setLang(code) {
+    currentLang = code;
+    const L = LANGS[code];
+    document.getElementById('lbl-subtitle').textContent    = L.subtitle;
+    document.getElementById('lbl-search-label').textContent = L.searchLabel;
+    document.getElementById('btn-check').textContent       = L.btnCheck;
+    document.getElementById('lbl-rank').textContent        = L.rankLabel;
+    document.getElementById('lbl-subs').textContent        = L.subsLabel;
+    document.getElementById('lbl-per-min').textContent     = L.perMin;
+    document.getElementById('lbl-per-hr').textContent      = L.perHr;
+    document.getElementById('lbl-pending').textContent     = L.pending;
+    document.getElementById('lbl-views').textContent       = L.views;
+    document.getElementById('name-input').placeholder      = L.placeholder;
+    document.querySelectorAll('.lang-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.lang === code);
+    });
+    // re-render tag if result visible
+    if (document.getElementById('result').style.display !== 'none') {
+        renderTag();
+    }
+}
+
+// Build lang buttons
+const langBar = document.getElementById('lang-bar');
+Object.entries(LANGS).forEach(([code, L]) => {
+    const btn = document.createElement('button');
+    btn.className = 'lang-btn' + (code === 'en' ? ' active' : '');
+    btn.dataset.lang = code;
+    btn.textContent = L.name;
+    btn.onclick = () => setLang(code);
+    langBar.appendChild(btn);
+});
+
+// ── State ─────────────────────────────────────────────
+let odo = null;
+let currentSubs = 0;
+let lastResult = null; // store last search result for re-render
+
+// growth tracking for per-min / per-hr
+let growthHistory = []; // [{time, subs}]
+
+function recordGrowth(subs) {
+    const now = Date.now();
+    growthHistory.push({ time: now, subs });
+    // keep only last 70 minutes
+    growthHistory = growthHistory.filter(g => now - g.time < 70 * 60 * 1000);
+}
+
+function calcRates(currentSubs) {
+    const now = Date.now();
+    let perMin = 0, perHr = 0;
+    // per minute: compare to closest record ~60s ago
+    const minAgo = growthHistory.find(g => now - g.time >= 55000 && now - g.time <= 75000);
+    if (minAgo) perMin = Math.max(0, currentSubs - minAgo.subs);
+    // per hour: compare to closest record ~60min ago
+    const hrAgo = growthHistory.find(g => now - g.time >= 55*60000 && now - g.time <= 65*60000);
+    if (hrAgo) perHr = Math.max(0, currentSubs - hrAgo.subs);
+    // fallback: extrapolate from pending growth (server converts ~1/1200 per 3s tick)
+    // growth/1200 per 3s = growth * 20 per min
+    return { perMin, perHr };
+}
+
+function fmt(n) { return Number(n || 0).toLocaleString(); }
+
+function getRankClass(rank) {
+    if (rank === 1) return 'gold';
+    if (rank === 2) return 'silver';
+    if (rank === 3) return 'bronze';
+    return '';
+}
+
+function initOdo() {
+    if (odo) return;
+    const el = document.getElementById('subs-odo');
+    odo = new Odometer({ el, value: 0, format: '(,ddd)', theme: 'minimal', duration: 1500 });
+    odo.render();
+}
+
+function renderTag() {
+    if (!lastResult) return;
+    const { rank, user, ranking, idx } = lastResult;
+    const L = LANGS[currentLang];
+    const tagEl = document.getElementById('ch-tag');
+    if (rank === 1) {
+        tagEl.textContent = L.champion;
+    } else {
+        const above = ranking[idx - 1];
+        const gap = above.subs - user.subs;
+        tagEl.textContent = `${fmt(gap)} ${L.gapSuffix} ${L.gapTo}${rank - 1} ${above.name}`;
+    }
+}
+
+async function doSearch() {
+    const raw = document.getElementById('name-input').value.trim();
+    if (!raw) return;
+    const query = raw.startsWith('@') ? raw : '@' + raw;
+
+    document.getElementById('result').style.display = 'none';
+    document.getElementById('not-found').style.display = 'none';
+    document.getElementById('spinner').style.display = 'flex';
+
+    try {
+        const r = await fetch('/api/ranking');
+        const { ranking } = await r.json();
+        document.getElementById('spinner').style.display = 'none';
+
+        const idx = ranking.findIndex(u =>
+            u.name.toLowerCase() === query.toLowerCase() ||
+            u.name.toLowerCase() === raw.toLowerCase()
+        );
+
+        if (idx === -1) {
+            const L = LANGS[currentLang];
+            document.getElementById('not-found-msg').textContent = `"${query}" — ${L.notFound}`;
+            document.getElementById('not-found-hint').textContent = L.notFoundHint;
+            document.getElementById('not-found').style.display = 'block';
+            return;
+        }
+
+        const user = ranking[idx];
+        const rank = idx + 1;
+        lastResult = { rank, user, ranking, idx };
+
+        // rank
+        const rankEl = document.getElementById('rank-num');
+        rankEl.textContent = '#' + rank;
+        rankEl.className = 'rank-num ' + getRankClass(rank);
+
+        // icon / name
+        document.getElementById('ch-icon').src = (user.icon && user.icon !== '') ? user.icon : 'Default_icon.jpg';
+        document.getElementById('ch-name').textContent = user.name;
+        renderTag();
+
+        // subs odometer
+        initOdo();
+        recordGrowth(user.subs);
+        if (user.subs !== currentSubs) {
+            odo.update(user.subs);
+            currentSubs = user.subs;
+        }
+
+        // rates — use pending growth to estimate if no history yet
+        const { perMin, perHr } = calcRates(user.subs);
+        // Server converts growth at ~1/1200 per 3s tick → per minute ≈ growth * 20 / 1200 * 60 ≈ growth/1
+        // Better: use pending growth as proxy for "expected subs from commands since last conversion"
+        const pendingPerMin = Math.round((user.growth || 0) / 1200 * 20);
+        const pendingPerHr  = pendingPerMin * 60;
+        document.getElementById('rate-min').textContent = '+' + fmt(perMin || pendingPerMin);
+        document.getElementById('rate-hr').textContent  = '+' + fmt(perHr  || pendingPerHr);
+
+        // stats
+        document.getElementById('stat-growth').textContent = '+' + fmt(user.growth || 0);
+        document.getElementById('stat-views').textContent  = fmt(user.views || 0);
+
+        // show
+        const resultEl = document.getElementById('result');
+        resultEl.style.display = 'block';
+        const card = resultEl.querySelector('.result-card');
+        card.classList.remove('fade-in');
+        void card.offsetWidth;
+        card.classList.add('fade-in');
+
+        // start auto-refresh
+        startAutoRefresh(query);
+
+    } catch (e) {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('not-found-msg').textContent = LANGS[currentLang].errMsg;
+        document.getElementById('not-found').style.display = 'block';
+        console.error(e);
+    }
+}
+
+// Auto-refresh every 5s after first search
+let refreshTimer = null;
+let currentQuery = null;
+
+function startAutoRefresh(query) {
+    if (currentQuery === query) return;
+    currentQuery = query;
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(() => silentRefresh(query), 5000);
+}
+
+async function silentRefresh(query) {
+    try {
+        const r = await fetch('/api/ranking');
+        const { ranking } = await r.json();
+        const idx = ranking.findIndex(u =>
+            u.name.toLowerCase() === query.toLowerCase()
+        );
+        if (idx === -1) return;
+        const user = ranking[idx];
+        const rank = idx + 1;
+        lastResult = { rank, user, ranking, idx };
+
+        // update rank color
+        const rankEl = document.getElementById('rank-num');
+        rankEl.textContent = '#' + rank;
+        rankEl.className = 'rank-num ' + getRankClass(rank);
+        renderTag();
+
+        // subs
+        recordGrowth(user.subs);
+        initOdo();
+        if (user.subs !== currentSubs) {
+            odo.update(user.subs);
+            currentSubs = user.subs;
+        }
+
+        // rates
+        const { perMin, perHr } = calcRates(user.subs);
+        const pendingPerMin = Math.round((user.growth || 0) / 1200 * 20);
+        const pendingPerHr  = pendingPerMin * 60;
+        document.getElementById('rate-min').textContent = '+' + fmt(perMin || pendingPerMin);
+        document.getElementById('rate-hr').textContent  = '+' + fmt(perHr  || pendingPerHr);
+
+        document.getElementById('stat-growth').textContent = '+' + fmt(user.growth || 0);
+        document.getElementById('stat-views').textContent  = fmt(user.views || 0);
+    } catch (e) {}
+}
+
+document.getElementById('name-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+});
+
+// URL param preload
+const params = new URLSearchParams(location.search);
+const preload = params.get('name');
+if (preload) {
+    document.getElementById('name-input').value = preload;
+    doSearch();
+}
+</script>
+</body>
+</html>
