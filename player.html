@@ -237,6 +237,41 @@
         }
         .fade-in { animation: fadeUp 0.3s ease forwards; }
 
+
+        /* ── Suggest dropdown ── */
+        .search-wrap { position: relative; }
+        .suggest-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #0d1e3a;
+            border: 1.5px solid rgba(0,71,171,0.6);
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            z-index: 100;
+            overflow: hidden;
+            display: none;
+        }
+        .suggest-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            transition: background 0.15s;
+            border-bottom: 1px solid rgba(0,71,171,0.2);
+        }
+        .suggest-item:last-child { border-bottom: none; }
+        .suggest-item:hover { background: rgba(0,71,171,0.3); }
+        .suggest-icon {
+            width: 32px; height: 32px;
+            object-fit: cover;
+            background: #1a2a4a;
+            flex-shrink: 0;
+        }
+        .suggest-name { font-size: 0.9em; font-weight: 700; flex: 1; }
+        .suggest-subs { font-size: 0.75em; color: var(--gray); }
         footer {
             margin-top: auto;
             padding: 24px;
@@ -261,6 +296,7 @@
             <input class="search-input" id="name-input" type="text" placeholder="@YourChannelName" autocomplete="off" spellcheck="false">
             <button class="search-btn" id="btn-check" onclick="doSearch()">CHECK</button>
         </div>
+        <div class="suggest-list" id="suggest-list"></div>
     </div>
 
     <div class="spinner-wrap" id="spinner"><div class="spinner"></div></div>
@@ -533,6 +569,45 @@ function renderTag() {
     }
 }
 
+
+function fmt2(n) { return Number(n||0).toLocaleString(); }
+
+let suggestTimer = null;
+
+async function fetchSuggest(q) {
+    if (!q || q.length < 1) { hideSuggest(); return; }
+    try {
+        const clean = q.startsWith('@') ? q.slice(1) : q;
+        const r = await fetch('/api/suggest?q=' + encodeURIComponent(clean));
+        const { channels } = await r.json();
+        showSuggest(channels);
+    } catch(e) { hideSuggest(); }
+}
+
+function showSuggest(channels) {
+    const list = document.getElementById('suggest-list');
+    if (!channels || channels.length === 0) { hideSuggest(); return; }
+    const DEF = 'Default_icon.jpg';
+    list.innerHTML = channels.map(ch => `
+        <div class="suggest-item" onclick="selectSuggest('${ch.name.replace(/'/g, "\\'")}')">
+            <img class="suggest-icon" src="${ch.icon || DEF}" onerror="this.src='${DEF}'">
+            <span class="suggest-name">${ch.name}</span>
+            <span class="suggest-subs">${fmt2(ch.subs)}</span>
+        </div>
+    `).join('');
+    list.style.display = 'block';
+}
+
+function hideSuggest() {
+    document.getElementById('suggest-list').style.display = 'none';
+}
+
+function selectSuggest(name) {
+    document.getElementById('name-input').value = name;
+    hideSuggest();
+    doSearch();
+}
+
 async function doSearch() {
     const raw = document.getElementById('name-input').value.trim();
     if (!raw) return;
@@ -663,8 +738,16 @@ async function silentRefresh(query) {
     } catch (e) {}
 }
 
+document.getElementById('name-input').addEventListener('input', e => {
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(() => fetchSuggest(e.target.value.trim()), 200);
+});
 document.getElementById('name-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') doSearch();
+});
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrap')) hideSuggest();
 });
 
 // URL param preload
