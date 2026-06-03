@@ -174,6 +174,40 @@ setInterval(async () => {
     } catch (e) {}
 }, 3000);
 
+// ── 一回限りのインポートAPI ───────────────────────────
+// 使用後は IMPORT_DONE=true を Render の Environment Variable に設定して無効化
+app.get('/api/import-data', async (req, res) => {
+    if (process.env.IMPORT_DONE === 'true') {
+        return res.send('Import already done.');
+    }
+    const { secret } = req.query;
+    if (secret !== STREAMER_PASSWORD) return res.status(403).send('Forbidden');
+    try {
+        const channels = [
+            {name:'@ryushorts5300v2',subs:47607,icon:'https://yt3.ggpht.com/RSfHfY2m_0ky-vqSsbS5zzdffBWjaeeahsXjwVT7wKLioKjy4DxOnV7wLdBJpSEa1w3ZobBTEQ=s800-c-k-c0xffffffff-no-rj-mo',growth:0,views:6198,viewGrowth:0},
+            {name:'@I_DunnoLOLL',subs:65097,icon:'https://yt3.ggpht.com/HP_4YiG5fqNfdE5MISegstXk9qnP6vtti4kfKEiG1MB8dqvo2uvtTycLI6SjVO_cCWOGsLAN=s800-c-k-c0xffffffff-no-rj-mo',growth:0,views:0,viewGrowth:0},
+            {name:'@SupermanBloxJP',subs:39530,icon:'https://yt3.ggpht.com/YWahipoL-mqyZTCsl9WIOXm-S-MygBJzhrhYmr9qPCLGdDVpB-xo2TVIiaGW1S6fkTsjhMGT=s800-c-k-c0xffffffff-no-rj-mo',growth:0,views:0,viewGrowth:0},
+            {name:'@AarusheditsOP',subs:19822,icon:'https://yt3.ggpht.com/Lc_wJK5lX4vRXgCib3ttpDMp_Mx6jNfdDwfp54xVtrW31a8X4BshLJCJsNzXmj5cN0zjUCVFMg=s800-c-k-c0xffffffff-no-rj-mo',growth:0,views:0,viewGrowth:0},
+            {name:'@Charliedan06',subs:1722,icon:'https://yt3.ggpht.com/EgSS0XYcrvgl0KlHvocnq2QQozyEFZLC9_v1Rcfj2Ur_oej06rUDf3LCWth3ANY_A9gp0muqAA=s800-c-k-c0xffffffff-no-rj-mo',growth:0,views:6389,viewGrowth:0},
+            {name:'@wadman12-n6t',subs:263,icon:'',growth:0,views:836,viewGrowth:0},
+            {name:'@IndiaYeshins',subs:118,icon:'',growth:0,views:552,viewGrowth:0},
+            {name:'@환장강',subs:15408,icon:'https://yt3.ggpht.com/V1mmiN_2gd2dIS6vOyCOl1Wceb8bNmn1jrtYC5qVTxgAkMhSecs1Y6ePbDGyqdt7oBK9m9F6JQ=s800-c-k-c0xffffffff-no-rj-mo',growth:0,views:71370,viewGrowth:284}
+        ];
+        const videos = [
+            {id:'mova91pc83a23',title:'No Title',channelName:'@ryushorts5300v2',channelIcon:'https://yt3.ggpht.com/RSfHfY2m_0ky-vqSsbS5zzdffBWjaeeahsXjwVT7wKLioKjy4DxOnV7wLdBJpSEa1w3ZobBTEQ=s800-c-k-c0xffffffff-no-rj-mo',views:78,viewGrowth:0}
+        ];
+        for (const ch of channels) {
+            await pool.query('INSERT INTO channels (name,subs,icon,growth,views,view_growth) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (name) DO UPDATE SET subs=EXCLUDED.subs,icon=EXCLUDED.icon,growth=EXCLUDED.growth,views=EXCLUDED.views,view_growth=EXCLUDED.view_growth',
+                [ch.name,ch.subs,ch.icon,ch.growth,ch.views,ch.viewGrowth]);
+        }
+        for (const v of videos) {
+            await pool.query('INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING',
+                [v.id,v.title,v.channelName,v.channelIcon,v.views,v.viewGrowth]);
+        }
+        res.send('Import complete! ' + channels.length + ' channels, ' + videos.length + ' videos. Now set IMPORT_DONE=true in Render Environment Variables.');
+    } catch(e) { res.status(500).send('Import error: ' + e.message); }
+});
+
 // ── YouTube 検索ヘルパー ──────────────────────────────
 async function searchYouTubeChannel(query) {
     if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') return null;
