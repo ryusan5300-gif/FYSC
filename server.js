@@ -375,50 +375,6 @@ app.get('/api/stats/channel', async (req, res) => {
     }
 });
 
-// ── パスワード保護 ────────────────────────────────────
-// Render の Environment Variable で STREAMER_PASSWORD を設定してください
-// 例: STREAMER_PASSWORD=mypassword1234
-const STREAMER_PASSWORD = process.env.STREAMER_PASSWORD || 'fysc2024';
-
-// 配信者専用ページ一覧
-const PROTECTED_PAGES = [
-    'index.html',
-    'Battle.html',
-    'Fastest_growth.html',
-    'stats.html',
-    'Totalsubscribers.html',
-    'TotalView.html',
-    'VideoViewTOP50.html',
-];
-
-// パスワード確認API
-app.get('/api/auth', (req, res) => {
-    const { password } = req.query;
-    if (password === STREAMER_PASSWORD) {
-        res.json({ ok: true });
-    } else {
-        res.json({ ok: false });
-    }
-});
-
-// 保護ページへのアクセス → login.html にリダイレクト
-app.get('/:page', (req, res, next) => {
-    const page = req.params.page;
-    if (PROTECTED_PAGES.includes(page)) {
-        // クエリパラメータにpasswordがあれば検証
-        if (req.query.password === STREAMER_PASSWORD) {
-            return next(); // static fileとして通す
-        }
-        // なければログインページへ
-        return res.redirect(`/login.html?redirect=${encodeURIComponent('/' + page)}`);
-    }
-    next();
-});
-
-// トップページ → player.html（視聴者向け）
-app.get('/', (_req, res) => {
-    res.sendFile(path.join(__dirname, 'player.html'));
-});
 
 // ── Static files ─────────────────────────────────────
 app.use(express.static('.'));
