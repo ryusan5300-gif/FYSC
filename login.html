@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FYSC — Streamer Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #010b1f;
+            color: #fff;
+            font-family: 'Noto Sans JP', 'Segoe UI', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0,71,171,0.07) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,71,171,0.07) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+        }
+        .card {
+            background: rgba(0,71,171,0.12);
+            border: 1.5px solid rgba(0,71,171,0.45);
+            border-radius: 14px;
+            padding: 40px 40px 36px;
+            width: 100%;
+            max-width: 380px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+            position: relative;
+        }
+        .logo {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 2.6em;
+            letter-spacing: 6px;
+            line-height: 1;
+        }
+        .logo span { color: #FFD700; }
+        .label {
+            font-size: 0.72em;
+            color: #8a9bb5;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            text-align: center;
+        }
+        .input-wrap {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .input-label {
+            font-size: 0.72em;
+            color: #8a9bb5;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+        input[type="password"] {
+            width: 100%;
+            background: rgba(0,71,171,0.15);
+            border: 1.5px solid rgba(0,71,171,0.5);
+            border-radius: 6px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 1em;
+            padding: 12px 16px;
+            outline: none;
+            transition: border-color 0.2s;
+            letter-spacing: 2px;
+        }
+        input[type="password"]:focus {
+            border-color: #0047AB;
+        }
+        .btn {
+            width: 100%;
+            background: #0047AB;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.95em;
+            font-weight: 700;
+            padding: 13px;
+            cursor: pointer;
+            letter-spacing: 2px;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .btn:hover { background: #0057d0; }
+        .btn:active { transform: scale(0.98); }
+        .error {
+            font-size: 0.82em;
+            color: #ff6b6b;
+            text-align: center;
+            display: none;
+        }
+        .viewer-link {
+            font-size: 0.75em;
+            color: #8a9bb5;
+            text-align: center;
+        }
+        .viewer-link a {
+            color: #5599ff;
+            text-decoration: none;
+        }
+        .viewer-link a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="logo">FY<span>S</span>C</div>
+    <div class="label">Streamer Access Only</div>
+
+    <div class="input-wrap">
+        <div class="input-label">Password</div>
+        <input type="password" id="pw-input" placeholder="Enter password" autofocus>
+    </div>
+
+    <div class="error" id="error-msg">Incorrect password. Try again.</div>
+
+    <button class="btn" onclick="doLogin()">ENTER</button>
+
+    <div class="viewer-link">
+        Viewer? <a href="/player.html">Check your sub count here</a>
+    </div>
+</div>
+
+<script>
+const params   = new URLSearchParams(location.search);
+const redirect = params.get('redirect') || '/index.html';
+
+async function doLogin() {
+    const pw = document.getElementById('pw-input').value.trim();
+    if (!pw) return;
+
+    const r = await fetch('/api/auth?password=' + encodeURIComponent(pw));
+    const { ok } = await r.json();
+
+    if (ok) {
+        // パスワードをクエリに付けてリダイレクト
+        const sep = redirect.includes('?') ? '&' : '?';
+        location.href = redirect + sep + 'password=' + encodeURIComponent(pw);
+    } else {
+        document.getElementById('error-msg').style.display = 'block';
+        document.getElementById('pw-input').value = '';
+        document.getElementById('pw-input').focus();
+    }
+}
+
+document.getElementById('pw-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+});
+</script>
+</body>
+</html>
