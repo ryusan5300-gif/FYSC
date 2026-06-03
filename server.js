@@ -3,11 +3,12 @@ const { Pool } = require('pg');
 const app      = express();
 const PORT     = process.env.PORT || 3000;
 
-// YouTube Data API key
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyDAJfuzKGV1aqOyvY-b6kJIwajlwe4LNkQ';
 
+// 配信者専用パスワード（Render の Environment Variable で上書き推奨）
+const STREAMER_PASSWORD = process.env.STREAMER_PASSWORD || 'fysc2024';
+
 // ── PostgreSQL 接続 ──────────────────────────────────
-// Render が DATABASE_URL を自動でセットしてくれる
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
@@ -55,27 +56,6 @@ async function getAllVideos() {
     return rows;
 }
 
-async function upsertChannel(ch) {
-    await pool.query(`
-        INSERT INTO channels (name, subs, icon, growth, views, view_growth)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (name) DO UPDATE SET
-            subs        = EXCLUDED.subs,
-            icon        = EXCLUDED.icon,
-            growth      = EXCLUDED.growth,
-            views       = EXCLUDED.views,
-            view_growth = EXCLUDED.view_growth
-    `, [ch.name, ch.subs||0, ch.icon||'', ch.growth||0, ch.views||0, ch.viewGrowth||0]);
-}
-
-async function insertVideo(v) {
-    await pool.query(`
-        INSERT INTO videos (id, title, channel_name, channel_icon, views, view_growth)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (id) DO NOTHING
-    `, [v.id, v.title, v.channelName||'', v.channelIcon||'', v.views||0, v.viewGrowth||0]);
-}
-
 // ── ユーティリティ ───────────────────────────────────
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
@@ -87,10 +67,80 @@ function buildSortedChannels(channels) {
     return [...channels].sort((a, b) => b.subs - a.subs).slice(0, 50);
 }
 
+// ── 配信者専用ページ保護ミドルウェア ─────────────────
+// クッキーにパスワードが入っていなければログインページにリダイレクト
+function streamerOnly(req, res, next) {
+    const cookie = req.headers.cookie || '';
+    const match  = cookie.match(/fysc_auth=([^;]+)/);
+    if (match && match[1] === STREAMER_PASSWORD) return next();
+    res.redirect('/login.html');
+}
+
+// ── 認証API ─────────────────────────────────────────
+// パスワード確認：正しければクッキーをセットしてリダイレクト
+app.get('/api/auth', (req, res) => {
+    const { pw, redirect } = req.query;
+    if (pw === STREAMER_PASSWORD) {
+        // 7日間有効なクッキーをセット
+        res.setHeader('Set-Cookie',
+            `fysc_auth=${STREAMER_PASSWORD}; Path=/; Max-Age=${60*60*24*7}; HttpOnly; SameSite=Lax`
+        );
+        res.redirect(redirect || '/streamer/ranking');
+    } else {
+        res.redirect('/login.html?error=1');
+    }
+});
+
+// ── 配信者専用ルート ─────────────────────────────────
+const path = require('path');
+
+// /streamer/ranking  → index.html
+app.get('/streamer/ranking', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+// /streamer/battle   → Battle.html
+app.get('/streamer/battle', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'Battle.html'));
+});
+// /streamer/fastest  → Fastest_growth.html
+app.get('/streamer/fastest', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'Fastest_growth.html'));
+});
+// /streamer/totalsubscribers → Totalsubscribers.html
+app.get('/streamer/totalsubscribers', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'Totalsubscribers.html'));
+});
+// /streamer/totalviews → TotalView.html
+app.get('/streamer/totalviews', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'TotalView.html'));
+});
+// /streamer/videotop → VideoViewTOP50.html
+app.get('/streamer/videotop', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'VideoViewTOP50.html'));
+});
+// /streamer/stats    → stats.html
+app.get('/streamer/stats', streamerOnly, (_req, res) => {
+    res.sendFile(path.join(__dirname, 'stats.html'));
+});
+
+// 旧URLを直打ちされたらログインにリダイレクト（念のため）
+const PROTECTED_FILES = ['index.html','Battle.html','Fastest_growth.html',
+    'Totalsubscribers.html','TotalView.html','VideoViewTOP50.html','stats.html'];
+
+PROTECTED_FILES.forEach(f => {
+    app.get('/' + f, streamerOnly, (req, res) => {
+        res.sendFile(path.join(__dirname, f));
+    });
+    // 拡張子なしアクセスも念のため
+    const base = f.replace('.html','').toLowerCase();
+    app.get('/' + base, streamerOnly, (req, res) => {
+        res.sendFile(path.join(__dirname, f));
+    });
+});
+
 // ── 定期的な Growth → Subs / Views 変換 (3秒ごと) ──
 setInterval(async () => {
     try {
-        // channels
         await pool.query(`
             UPDATE channels SET
                 subs        = subs        + GREATEST(1, CEIL(growth      / 1200.0)),
@@ -99,7 +149,6 @@ setInterval(async () => {
                 view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
             WHERE growth > 0 OR view_growth > 0
         `);
-        // videos
         await pool.query(`
             UPDATE videos SET
                 views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
@@ -206,8 +255,7 @@ app.get('/api/command', async (req, res) => {
                     }
 
                     await pool.query(
-                        `UPDATE channels
-                         SET growth = growth + $1, view_growth = view_growth + $2
+                        `UPDATE channels SET growth = growth + $1, view_growth = view_growth + $2
                          WHERE LOWER(name) = LOWER($3)`,
                         [g, vg, user]
                     );
@@ -215,7 +263,6 @@ app.get('/api/command', async (req, res) => {
                     const videoTitle = (title && title.trim() !== '') ? title.trim() : 'No Title';
                     const videoId    = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-                    // 最新のアイコンを取得
                     const { rows: chRows } = await pool.query(
                         'SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)', [user]
                     );
@@ -246,9 +293,7 @@ app.get('/api/ranking', async (_req, res) => {
     try {
         const channels = await getAllChannels();
         res.json({ ranking: buildSortedChannels(channels) });
-    } catch (e) {
-        res.status(500).json({ ranking: [] });
-    }
+    } catch (e) { res.status(500).json({ ranking: [] }); }
 });
 
 // ── API: total-stats ─────────────────────────────────
@@ -259,9 +304,7 @@ app.get('/api/total-stats', async (_req, res) => {
         const totalViews = channels.reduce((s, u) => s + (u.views || 0), 0);
         const sorted     = [...channels].sort((a, b) => b.subs - a.subs);
         res.json({ totalSubs, totalViews, count: channels.length, ranking: sorted });
-    } catch (e) {
-        res.status(500).json({ totalSubs: 0, totalViews: 0, count: 0, ranking: [] });
-    }
+    } catch (e) { res.status(500).json({ totalSubs:0, totalViews:0, count:0, ranking:[] }); }
 });
 
 // ── API: fastest-growth ──────────────────────────────
@@ -273,9 +316,7 @@ app.get('/api/fastest-growth', async (_req, res) => {
             .sort((a, b) => b.growthPerHr - a.growthPerHr)
             .slice(0, 50);
         res.json({ channels: sorted });
-    } catch (e) {
-        res.status(500).json({ channels: [] });
-    }
+    } catch (e) { res.status(500).json({ channels: [] }); }
 });
 
 // ── API: video-top50 ─────────────────────────────────
@@ -284,9 +325,7 @@ app.get('/api/video-top50', async (_req, res) => {
         const videos = await getAllVideos();
         const sorted = [...videos].sort((a, b) => b.views - a.views).slice(0, 50);
         res.json({ videos: sorted });
-    } catch (e) {
-        res.status(500).json({ videos: [] });
-    }
+    } catch (e) { res.status(500).json({ videos: [] }); }
 });
 
 // ── API: YouTube Stats proxy ─────────────────────────
@@ -336,7 +375,52 @@ app.get('/api/stats/channel', async (req, res) => {
     }
 });
 
-// ── Static files & Start ─────────────────────────────
+// ── パスワード保護 ────────────────────────────────────
+// Render の Environment Variable で STREAMER_PASSWORD を設定してください
+// 例: STREAMER_PASSWORD=mypassword1234
+const STREAMER_PASSWORD = process.env.STREAMER_PASSWORD || 'fysc2024';
+
+// 配信者専用ページ一覧
+const PROTECTED_PAGES = [
+    'index.html',
+    'Battle.html',
+    'Fastest_growth.html',
+    'stats.html',
+    'Totalsubscribers.html',
+    'TotalView.html',
+    'VideoViewTOP50.html',
+];
+
+// パスワード確認API
+app.get('/api/auth', (req, res) => {
+    const { password } = req.query;
+    if (password === STREAMER_PASSWORD) {
+        res.json({ ok: true });
+    } else {
+        res.json({ ok: false });
+    }
+});
+
+// 保護ページへのアクセス → login.html にリダイレクト
+app.get('/:page', (req, res, next) => {
+    const page = req.params.page;
+    if (PROTECTED_PAGES.includes(page)) {
+        // クエリパラメータにpasswordがあれば検証
+        if (req.query.password === STREAMER_PASSWORD) {
+            return next(); // static fileとして通す
+        }
+        // なければログインページへ
+        return res.redirect(`/login.html?redirect=${encodeURIComponent('/' + page)}`);
+    }
+    next();
+});
+
+// トップページ → player.html（視聴者向け）
+app.get('/', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'player.html'));
+});
+
+// ── Static files ─────────────────────────────────────
 app.use(express.static('.'));
 
 initDB().then(() => {
