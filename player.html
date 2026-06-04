@@ -515,41 +515,50 @@ let odo = null;
 let odoViews = null;
 let currentSubs = 0;
 let currentViews = 0;
-let lastResult = null; // store last search result for re-render
+let lastResult = null;
 
-// growth tracking for per-min / per-hr
-let growthHistory = []; // [{time, subs}]
+// growth tracking: {time, subs, growth} を記録
+// growth フィールドはその時点の pending growth 値
+let growthHistory = []; // [{time, subs, growth}]
 
-function recordGrowth(subs) {
+function recordGrowth(subs, growth) {
     const now = Date.now();
-    growthHistory.push({ time: now, subs });
-    // keep only last 70 minutes
+    growthHistory.push({ time: now, subs, growth });
+    // 70分より古いものは削除
     growthHistory = growthHistory.filter(g => now - g.time < 70 * 60 * 1000);
 }
 
-function calcRates(currentSubs, pendingGrowth) {
+function calcRates(subs, pendingGrowth) {
     const now = Date.now();
     let perMin = 0, perHr = 0;
-    // per minute: compare to record closest to 60s ago
-    const minAgo = growthHistory.filter(g => now - g.time >= 30000 && now - g.time <= 90000);
-    if (minAgo.length > 0) {
-        const oldest = minAgo[minAgo.length - 1];
-        const elapsed = (now - oldest.time) / 60000; // minutes
-        if (elapsed > 0) perMin = Math.round(Math.max(0, currentSubs - oldest.subs) / elapsed);
+
+    // ── 実測ベース（履歴が溜まっていれば使う） ──
+    // Per Minute: 30〜90秒前のレコードと比較
+    const minCandidates = growthHistory.filter(g => now - g.time >= 30000 && now - g.time <= 90000);
+    if (minCandidates.length > 0) {
+        const ref = minCandidates[minCandidates.length - 1];
+        const elapsedMin = (now - ref.time) / 60000;
+        if (elapsedMin > 0) perMin = Math.round(Math.max(0, subs - ref.subs) / elapsedMin);
     }
-    // per hour: compare to record closest to 60min ago
-    const hrAgo = growthHistory.filter(g => now - g.time >= 30*60000 && now - g.time <= 90*60000);
-    if (hrAgo.length > 0) {
-        const oldest = hrAgo[hrAgo.length - 1];
-        const elapsed = (now - oldest.time) / 3600000; // hours
-        if (elapsed > 0) perHr = Math.round(Math.max(0, currentSubs - oldest.subs) / elapsed);
+    // Per Hour: 30〜90分前のレコードと比較
+    const hrCandidates = growthHistory.filter(g => now - g.time >= 30*60000 && now - g.time <= 90*60000);
+    if (hrCandidates.length > 0) {
+        const ref = hrCandidates[hrCandidates.length - 1];
+        const elapsedHr = (now - ref.time) / 3600000;
+        if (elapsedHr > 0) perHr = Math.round(Math.max(0, subs - ref.subs) / elapsedHr);
     }
-    // fallback: extrapolate from pending growth
-    // server tick: each 3s, adds CEIL(growth/1200) subs → per min ≈ growth/1200*20 = growth/60
-    if (perMin === 0 && pendingGrowth > 0) {
-        perMin = Math.max(1, Math.round(pendingGrowth / 60));
-        perHr  = perMin * 60;
-    }
+
+    // ── Pending Growth ベースの推定（履歴が足りないうちはこっちを使う） ──
+    // サーバーは3秒ごとに CEIL(growth/1200) をsubsに加算する
+    // → 1分(20tick)あたり: growth/1200 * 20 = growth/60 subs/min
+    // ただし growth は使うたびに減るので「今この瞬間の growth」での推定
+    const estPerMin = pendingGrowth > 0 ? Math.max(1, Math.round(pendingGrowth / 60)) : 0;
+    const estPerHr  = estPerMin * 60;
+
+    // 実測が取れていない間は推定値を使う
+    if (perMin === 0) perMin = estPerMin;
+    if (perHr  === 0) perHr  = estPerHr > 0 ? estPerHr : perMin * 60;
+
     return { perMin, perHr };
 }
 
@@ -673,7 +682,7 @@ async function doSearch() {
 
         // subs odometer
         initOdo();
-        recordGrowth(user.subs);
+        recordGrowth(user.subs, user.growth || 0);
         if (user.subs !== currentSubs) {
             odo.update(user.subs);
             currentSubs = user.subs;
@@ -740,7 +749,7 @@ async function silentRefresh(query) {
         renderTag();
 
         // subs
-        recordGrowth(user.subs);
+        recordGrowth(user.subs, user.growth || 0);
         initOdo();
         if (user.subs !== currentSubs) {
             odo.update(user.subs);
