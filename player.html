@@ -339,7 +339,7 @@
                 </div>
                 <div class="stat-cell">
                     <div class="stat-cell-label" id="lbl-views">Total Views</div>
-                    <div class="stat-cell-value" id="stat-views">0</div>
+                    <div class="stat-cell-value odometer" id="stat-views">0</div>
                 </div>
             </div>
         </div>
@@ -512,7 +512,9 @@ Object.entries(LANGS).forEach(([code, L]) => {
 
 // ── State ─────────────────────────────────────────────
 let odo = null;
+let odoViews = null;
 let currentSubs = 0;
+let currentViews = 0;
 let lastResult = null; // store last search result for re-render
 
 // growth tracking for per-min / per-hr
@@ -525,18 +527,38 @@ function recordGrowth(subs) {
     growthHistory = growthHistory.filter(g => now - g.time < 70 * 60 * 1000);
 }
 
-function calcRates(currentSubs) {
+function calcRates(currentSubs, pendingGrowth) {
     const now = Date.now();
     let perMin = 0, perHr = 0;
-    // per minute: compare to closest record ~60s ago
-    const minAgo = growthHistory.find(g => now - g.time >= 55000 && now - g.time <= 75000);
-    if (minAgo) perMin = Math.max(0, currentSubs - minAgo.subs);
-    // per hour: compare to closest record ~60min ago
-    const hrAgo = growthHistory.find(g => now - g.time >= 55*60000 && now - g.time <= 65*60000);
-    if (hrAgo) perHr = Math.max(0, currentSubs - hrAgo.subs);
-    // fallback: extrapolate from pending growth (server converts ~1/1200 per 3s tick)
-    // growth/1200 per 3s = growth * 20 per min
+    // per minute: compare to record closest to 60s ago
+    const minAgo = growthHistory.filter(g => now - g.time >= 30000 && now - g.time <= 90000);
+    if (minAgo.length > 0) {
+        const oldest = minAgo[minAgo.length - 1];
+        const elapsed = (now - oldest.time) / 60000; // minutes
+        if (elapsed > 0) perMin = Math.round(Math.max(0, currentSubs - oldest.subs) / elapsed);
+    }
+    // per hour: compare to record closest to 60min ago
+    const hrAgo = growthHistory.filter(g => now - g.time >= 30*60000 && now - g.time <= 90*60000);
+    if (hrAgo.length > 0) {
+        const oldest = hrAgo[hrAgo.length - 1];
+        const elapsed = (now - oldest.time) / 3600000; // hours
+        if (elapsed > 0) perHr = Math.round(Math.max(0, currentSubs - oldest.subs) / elapsed);
+    }
+    // fallback: extrapolate from pending growth
+    // server tick: each 3s, adds CEIL(growth/1200) subs → per min ≈ growth/1200*20 = growth/60
+    if (perMin === 0 && pendingGrowth > 0) {
+        perMin = Math.max(1, Math.round(pendingGrowth / 60));
+        perHr  = perMin * 60;
+    }
     return { perMin, perHr };
+}
+
+function initOdoViews() {
+    if (odoViews) return;
+    const el = document.getElementById('stat-views');
+    el.classList.add('odometer');
+    odoViews = new Odometer({ el, value: 0, format: '(,ddd)', theme: 'minimal', duration: 1500 });
+    odoViews.render();
 }
 
 function fmt(n) { return Number(n || 0).toLocaleString(); }
@@ -657,18 +679,17 @@ async function doSearch() {
             currentSubs = user.subs;
         }
 
-        // rates — use pending growth to estimate if no history yet
-        const { perMin, perHr } = calcRates(user.subs);
-        // Server converts growth at ~1/1200 per 3s tick → per minute ≈ growth * 20 / 1200 * 60 ≈ growth/1
-        // Better: use pending growth as proxy for "expected subs from commands since last conversion"
-        const pendingPerMin = Math.round((user.growth || 0) / 1200 * 20);
-        const pendingPerHr  = pendingPerMin * 60;
-        document.getElementById('rate-min').textContent = '+' + fmt(perMin || pendingPerMin);
-        document.getElementById('rate-hr').textContent  = '+' + fmt(perHr  || pendingPerHr);
+        // rates
+        const { perMin, perHr } = calcRates(user.subs, user.growth || 0);
+        document.getElementById('rate-min').textContent = '+' + fmt(perMin);
+        document.getElementById('rate-hr').textContent  = '+' + fmt(perHr);
 
         // stats
         document.getElementById('stat-growth').textContent = '+' + fmt(user.growth || 0);
-        document.getElementById('stat-views').textContent  = fmt(user.views || 0);
+        // Total Views odometer
+        initOdoViews();
+        const nv = user.views || 0;
+        if (nv !== currentViews) { odoViews.update(nv); currentViews = nv; }
 
         // show
         const resultEl = document.getElementById('result');
@@ -727,14 +748,15 @@ async function silentRefresh(query) {
         }
 
         // rates
-        const { perMin, perHr } = calcRates(user.subs);
-        const pendingPerMin = Math.round((user.growth || 0) / 1200 * 20);
-        const pendingPerHr  = pendingPerMin * 60;
-        document.getElementById('rate-min').textContent = '+' + fmt(perMin || pendingPerMin);
-        document.getElementById('rate-hr').textContent  = '+' + fmt(perHr  || pendingPerHr);
+        const { perMin, perHr } = calcRates(user.subs, user.growth || 0);
+        document.getElementById('rate-min').textContent = '+' + fmt(perMin);
+        document.getElementById('rate-hr').textContent  = '+' + fmt(perHr);
 
         document.getElementById('stat-growth').textContent = '+' + fmt(user.growth || 0);
-        document.getElementById('stat-views').textContent  = fmt(user.views || 0);
+        // Total Views odometer
+        initOdoViews();
+        const nv = user.views || 0;
+        if (nv !== currentViews) { odoViews.update(nv); currentViews = nv; }
     } catch (e) {}
 }
 
