@@ -146,7 +146,8 @@
             const {ranking}=await r.json();
             if(!ranking||!ranking.length)return;
 
-            const items=ranking.slice(0,10);
+            // Growth多い順にソートしてtop10
+            const items=[...ranking].sort((a,b)=>(b.growth||0)-(a.growth||0)).slice(0,10);
 
             function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
             function makeHTML(u,i){
