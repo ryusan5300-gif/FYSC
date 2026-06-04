@@ -115,25 +115,46 @@ PROTECTED_FILES.forEach(f => {
     app.get('/' + f, streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, f)));
 });
 
-// ── 定期的な Growth → Subs / Views 変換 (3秒ごと) ──
-setInterval(async () => {
+// ── 定期的な Growth → Subs / Views 変換 (チャンネルごとにランダム遅延 0〜3秒) ──
+async function runGrowthTick() {
     try {
-        await pool.query(`
-            UPDATE channels SET
-                subs        = subs        + GREATEST(1, CEIL(growth      / 1200.0)),
-                growth      = GREATEST(0, growth      - GREATEST(1, CEIL(growth      / 1200.0))),
-                views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
-                view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
-            WHERE growth > 0 OR view_growth > 0
-        `);
-        await pool.query(`
-            UPDATE videos SET
-                views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
-                view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
-            WHERE view_growth > 0
-        `);
+        const { rows } = await pool.query(
+            `SELECT name FROM channels WHERE growth > 0 OR view_growth > 0`
+        );
+        for (const row of rows) {
+            const delay = Math.floor(Math.random() * 3000);
+            setTimeout(async () => {
+                try {
+                    await pool.query(`
+                        UPDATE channels SET
+                            subs        = subs        + GREATEST(1, CEIL(growth      / 1200.0)),
+                            growth      = GREATEST(0, growth      - GREATEST(1, CEIL(growth      / 1200.0))),
+                            views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
+                            view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
+                        WHERE name = $1
+                    `, [row.name]);
+                } catch (e) { console.error('Channel tick error:', e.message); }
+            }, delay);
+        }
+        const { rows: vrows } = await pool.query(
+            `SELECT id FROM videos WHERE view_growth > 0`
+        );
+        for (const vrow of vrows) {
+            const delay = Math.floor(Math.random() * 3000);
+            setTimeout(async () => {
+                try {
+                    await pool.query(`
+                        UPDATE videos SET
+                            views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
+                            view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
+                        WHERE id = $1
+                    `, [vrow.id]);
+                } catch (e) { console.error('Video tick error:', e.message); }
+            }, delay);
+        }
     } catch (e) { console.error('Growth tick error:', e.message); }
-}, 3000);
+}
+setInterval(runGrowthTick, 3000);
 
 // ── ランキング順位変動検知 ────────────────────────────
 let rankingVersion = 0;
@@ -232,25 +253,27 @@ app.get('/api/command', async (req, res) => {
             case 'viewcount': message = `@${user} Views: ${(ch.views||0).toLocaleString()}`; break;
             default: {
                 if (videoCommands.includes(cmd)) {
-                    let g, vg, prefix;
+                    let g, vg;
                     switch(cmd) {
-                        case 'video':  g=rand(10,50);   vg=rand(g*2,g*4); prefix='[Video]';  break;
-                        case 'short':  g=rand(10,50);   vg=rand(g*2,g*4); prefix='[Short]';  break;
-                        case 'stream': g=rand(1,350);   vg=rand(g*2,g*5); prefix='[Stream]'; break;
-                        case 'viral':  g=rand(10,500);  vg=rand(g*3,g*6); prefix='[Viral]';  break;
-                        case 'trend':  g=rand(10,1000); vg=rand(g*3,g*7); prefix='[Trend]';  break;
+                        case 'video':  g=rand(10,50);   vg=rand(g*2,g*4); break;
+                        case 'short':  g=rand(10,50);   vg=rand(g*2,g*4); break;
+                        case 'stream': g=rand(1,350);   vg=rand(g*2,g*5); break;
+                        case 'viral':  g=rand(10,500);  vg=rand(g*3,g*6); break;
+                        case 'trend':  g=rand(10,1000); vg=rand(g*3,g*7); break;
                     }
                     await pool.query(
                         `UPDATE channels SET growth=growth+$1,view_growth=view_growth+$2 WHERE LOWER(name)=LOWER($3)`,
                         [g,vg,user]);
-                    const videoTitle = (title && title.trim()!=='') ? title.trim() : 'No Title';
+                    // title: from ?title= param, or from querystring (NightBot $(querystring)), fallback 'No Title'
+                    const rawTitle = (title && title.trim() !== '') ? title.trim() : '';
+                    const videoTitle = rawTitle !== '' ? rawTitle : 'No Title';
                     const videoId    = Date.now().toString(36)+Math.random().toString(36).substr(2,5);
                     const { rows: chRows } = await pool.query('SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)',[user]);
                     const icon = chRows[0] ? chRows[0].icon : '';
                     await pool.query(
                         `INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,0,$5)`,
                         [videoId,videoTitle,user,icon,vg]);
-                    message = `${prefix} @${user} posted "${videoTitle}" (+${g} growth)`;
+                    message = `@${user} Posted a Video "${videoTitle}" (+${g} growth)`;
                 } else {
                     return res.send(`Unknown command: !${cmd}`);
                 }
