@@ -1,11 +1,10 @@
 const express  = require('express');
 const { Pool } = require('pg');
+const path     = require('path');
 const app      = express();
 const PORT     = process.env.PORT || 3000;
 
-const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyDAJfuzKGV1aqOyvY-b6kJIwajlwe4LNkQ';
-
-// 配信者専用パスワード（Render の Environment Variable で上書き推奨）
+const YOUTUBE_API_KEY   = process.env.YOUTUBE_API_KEY   || 'AIzaSyDAJfuzKGV1aqOyvY-b6kJIwajlwe4LNkQ';
 const STREAMER_PASSWORD = process.env.STREAMER_PASSWORD || 'fysc2024';
 
 // ── PostgreSQL 接続 ──────────────────────────────────
@@ -67,23 +66,30 @@ function buildSortedChannels(channels) {
     return [...channels].sort((a, b) => b.subs - a.subs).slice(0, 50);
 }
 
-// ── 配信者専用ページ保護ミドルウェア ─────────────────
-// クッキーにパスワードが入っていなければログインページにリダイレクト
+// ── 配信者専用保護ミドルウェア ────────────────────────
+// URLパラメータ ?password=xxx またはCookieで認証
 function streamerOnly(req, res, next) {
+    // URLパラメータにパスワードがあればCookieにセットして通す
+    if (req.query.password === STREAMER_PASSWORD) {
+        res.setHeader('Set-Cookie',
+            `fysc_auth=${STREAMER_PASSWORD}; Path=/; Max-Age=${60*60*24*30}; SameSite=Lax`
+        );
+        return next();
+    }
+    // Cookieにパスワードがあれば通す
     const cookie = req.headers.cookie || '';
     const match  = cookie.match(/fysc_auth=([^;]+)/);
     if (match && match[1] === STREAMER_PASSWORD) return next();
-    res.redirect('/login.html');
+    // どちらもなければログインページへ
+    res.redirect('/login.html?redirect=' + encodeURIComponent(req.originalUrl));
 }
 
 // ── 認証API ─────────────────────────────────────────
-// パスワード確認：正しければクッキーをセットしてリダイレクト
 app.get('/api/auth', (req, res) => {
     const { pw, redirect } = req.query;
     if (pw === STREAMER_PASSWORD) {
-        // 7日間有効なクッキーをセット
         res.setHeader('Set-Cookie',
-            `fysc_auth=${STREAMER_PASSWORD}; Path=/; Max-Age=${60*60*24*7}; HttpOnly; SameSite=Lax`
+            `fysc_auth=${STREAMER_PASSWORD}; Path=/; Max-Age=${60*60*24*30}; SameSite=Lax`
         );
         res.redirect(redirect || '/streamer/ranking');
     } else {
@@ -91,51 +97,22 @@ app.get('/api/auth', (req, res) => {
     }
 });
 
-// ── 配信者専用ルート ─────────────────────────────────
-const path = require('path');
+// ── 配信者専用ルート（/streamer/xxx） ────────────────
+app.get('/streamer/ranking',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/streamer/battle',           streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Battle.html')));
+app.get('/streamer/fastest',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Fastest_growth.html')));
+app.get('/streamer/totalsubscribers', streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Totalsubscribers.html')));
+app.get('/streamer/totalviews',       streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'TotalView.html')));
+app.get('/streamer/videotop',         streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'VideoViewTOP50.html')));
+app.get('/streamer/stats',            streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'stats.html')));
 
-// /streamer/ranking  → index.html
-app.get('/streamer/ranking', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-// /streamer/battle   → Battle.html
-app.get('/streamer/battle', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'Battle.html'));
-});
-// /streamer/fastest  → Fastest_growth.html
-app.get('/streamer/fastest', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'Fastest_growth.html'));
-});
-// /streamer/totalsubscribers → Totalsubscribers.html
-app.get('/streamer/totalsubscribers', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'Totalsubscribers.html'));
-});
-// /streamer/totalviews → TotalView.html
-app.get('/streamer/totalviews', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'TotalView.html'));
-});
-// /streamer/videotop → VideoViewTOP50.html
-app.get('/streamer/videotop', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'VideoViewTOP50.html'));
-});
-// /streamer/stats    → stats.html
-app.get('/streamer/stats', streamerOnly, (_req, res) => {
-    res.sendFile(path.join(__dirname, 'stats.html'));
-});
-
-// 旧URLを直打ちされたらログインにリダイレクト（念のため）
-const PROTECTED_FILES = ['index.html','Battle.html','Fastest_growth.html',
-    'Totalsubscribers.html','TotalView.html','VideoViewTOP50.html','stats.html'];
-
+// ── 直打ちアクセスも保護 ─────────────────────────────
+const PROTECTED_FILES = [
+    'index.html','Battle.html','Fastest_growth.html',
+    'Totalsubscribers.html','TotalView.html','VideoViewTOP50.html','stats.html'
+];
 PROTECTED_FILES.forEach(f => {
-    app.get('/' + f, streamerOnly, (req, res) => {
-        res.sendFile(path.join(__dirname, f));
-    });
-    // 拡張子なしアクセスも念のため
-    const base = f.replace('.html','').toLowerCase();
-    app.get('/' + base, streamerOnly, (req, res) => {
-        res.sendFile(path.join(__dirname, f));
-    });
+    app.get('/' + f, streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, f)));
 });
 
 // ── 定期的な Growth → Subs / Views 変換 (3秒ごと) ──
@@ -155,15 +132,12 @@ setInterval(async () => {
                 view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
             WHERE view_growth > 0
         `);
-    } catch (e) {
-        console.error('Growth tick error:', e.message);
-    }
+    } catch (e) { console.error('Growth tick error:', e.message); }
 }, 3000);
 
 // ── ランキング順位変動検知 ────────────────────────────
 let rankingVersion = 0;
 let lastOrderStr   = '';
-
 setInterval(async () => {
     try {
         const channels = await getAllChannels();
@@ -175,11 +149,8 @@ setInterval(async () => {
 }, 3000);
 
 // ── 一回限りのインポートAPI ───────────────────────────
-// 使用後は IMPORT_DONE=true を Render の Environment Variable に設定して無効化
 app.get('/api/import-data', async (req, res) => {
-    if (process.env.IMPORT_DONE === 'true') {
-        return res.send('Import already done.');
-    }
+    if (process.env.IMPORT_DONE === 'true') return res.send('Import already done.');
     const { secret } = req.query;
     if (secret !== STREAMER_PASSWORD) return res.status(403).send('Forbidden');
     try {
@@ -197,14 +168,18 @@ app.get('/api/import-data', async (req, res) => {
             {id:'mova91pc83a23',title:'No Title',channelName:'@ryushorts5300v2',channelIcon:'https://yt3.ggpht.com/RSfHfY2m_0ky-vqSsbS5zzdffBWjaeeahsXjwVT7wKLioKjy4DxOnV7wLdBJpSEa1w3ZobBTEQ=s800-c-k-c0xffffffff-no-rj-mo',views:78,viewGrowth:0}
         ];
         for (const ch of channels) {
-            await pool.query('INSERT INTO channels (name,subs,icon,growth,views,view_growth) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (name) DO UPDATE SET subs=EXCLUDED.subs,icon=EXCLUDED.icon,growth=EXCLUDED.growth,views=EXCLUDED.views,view_growth=EXCLUDED.view_growth',
+            await pool.query(
+                `INSERT INTO channels (name,subs,icon,growth,views,view_growth) VALUES ($1,$2,$3,$4,$5,$6)
+                 ON CONFLICT (name) DO UPDATE SET subs=EXCLUDED.subs,icon=EXCLUDED.icon,
+                 growth=EXCLUDED.growth,views=EXCLUDED.views,view_growth=EXCLUDED.view_growth`,
                 [ch.name,ch.subs,ch.icon,ch.growth,ch.views,ch.viewGrowth]);
         }
         for (const v of videos) {
-            await pool.query('INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING',
+            await pool.query(
+                `INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
                 [v.id,v.title,v.channelName,v.channelIcon,v.views,v.viewGrowth]);
         }
-        res.send('Import complete! ' + channels.length + ' channels, ' + videos.length + ' videos. Now set IMPORT_DONE=true in Render Environment Variables.');
+        res.send(`Import complete! ${channels.length} channels, ${videos.length} videos. Now set IMPORT_DONE=true in Render Environment Variables.`);
     } catch(e) { res.status(500).send('Import error: ' + e.message); }
 });
 
@@ -227,11 +202,6 @@ async function searchYouTubeChannel(query) {
     } catch (e) { console.error('YT search error:', e.message); return null; }
 }
 
-// ── API: ranking-version ─────────────────────────────
-app.get('/api/ranking-version', (_req, res) => {
-    res.json({ version: rankingVersion });
-});
-
 // ── API: command ─────────────────────────────────────
 const RESTRICTED    = ['video','short','stream','viral','trend','growth','subcount','viewcount'];
 const videoCommands = ['video','short','stream','viral','trend'];
@@ -239,28 +209,17 @@ const videoCommands = ['video','short','stream','viral','trend'];
 app.get('/api/command', async (req, res) => {
     const { user, cmd, title } = req.query;
     if (!user) return res.send('User error');
-
     try {
-        const { rows } = await pool.query(
-            'SELECT * FROM channels WHERE LOWER(name) = LOWER($1)', [user]
-        );
+        const { rows } = await pool.query('SELECT * FROM channels WHERE LOWER(name)=LOWER($1)', [user]);
         let ch = rows[0] || null;
-
-        if (!ch && RESTRICTED.includes(cmd)) {
-            return res.send(`@${user} You are not registered. Use !add first.`);
-        }
-
+        if (!ch && RESTRICTED.includes(cmd)) return res.send(`@${user} You are not registered. Use !add first.`);
         let message = '';
-
         switch (cmd) {
             case 'add': {
                 const yt = await searchYouTubeChannel(user);
                 if (!ch) {
-                    await pool.query(
-                        `INSERT INTO channels (name, subs, icon, growth, views, view_growth)
-                         VALUES ($1, 0, $2, 0, 0, 0)`,
-                        [user, yt ? yt.icon : '']
-                    );
+                    await pool.query(`INSERT INTO channels (name,subs,icon,growth,views,view_growth) VALUES ($1,0,$2,0,0,0)`,
+                        [user, yt ? yt.icon : '']);
                     message = `@${user} Added to rankings and system.`;
                 } else {
                     if (yt) await pool.query('UPDATE channels SET icon=$1 WHERE LOWER(name)=LOWER($2)', [yt.icon, user]);
@@ -268,178 +227,131 @@ app.get('/api/command', async (req, res) => {
                 }
                 break;
             }
-            case 'growth':
-                message = `@${user} Growth: ${(ch.growth || 0).toLocaleString()}`;
-                break;
-            case 'subcount':
-                message = `@${user} Subscribers: ${(ch.subs || 0).toLocaleString()}`;
-                break;
-            case 'viewcount':
-                message = `@${user} Views: ${(ch.views || 0).toLocaleString()}`;
-                break;
+            case 'growth':    message = `@${user} Growth: ${(ch.growth||0).toLocaleString()}`; break;
+            case 'subcount':  message = `@${user} Subscribers: ${(ch.subs||0).toLocaleString()}`; break;
+            case 'viewcount': message = `@${user} Views: ${(ch.views||0).toLocaleString()}`; break;
             default: {
                 if (videoCommands.includes(cmd)) {
                     let g, vg, prefix;
-                    switch (cmd) {
-                        case 'video':  g = rand(10, 50);   vg = rand(g*2, g*4); prefix = '[Video]';  break;
-                        case 'short':  g = rand(10, 50);   vg = rand(g*2, g*4); prefix = '[Short]';  break;
-                        case 'stream': g = rand(1, 350);   vg = rand(g*2, g*5); prefix = '[Stream]'; break;
-                        case 'viral':  g = rand(10, 500);  vg = rand(g*3, g*6); prefix = '[Viral]';  break;
-                        case 'trend':  g = rand(10, 1000); vg = rand(g*3, g*7); prefix = '[Trend]';  break;
+                    switch(cmd) {
+                        case 'video':  g=rand(10,50);   vg=rand(g*2,g*4); prefix='[Video]';  break;
+                        case 'short':  g=rand(10,50);   vg=rand(g*2,g*4); prefix='[Short]';  break;
+                        case 'stream': g=rand(1,350);   vg=rand(g*2,g*5); prefix='[Stream]'; break;
+                        case 'viral':  g=rand(10,500);  vg=rand(g*3,g*6); prefix='[Viral]';  break;
+                        case 'trend':  g=rand(10,1000); vg=rand(g*3,g*7); prefix='[Trend]';  break;
                     }
-
                     await pool.query(
-                        `UPDATE channels SET growth = growth + $1, view_growth = view_growth + $2
-                         WHERE LOWER(name) = LOWER($3)`,
-                        [g, vg, user]
-                    );
-
-                    const videoTitle = (title && title.trim() !== '') ? title.trim() : 'No Title';
-                    const videoId    = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
-                    const { rows: chRows } = await pool.query(
-                        'SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)', [user]
-                    );
+                        `UPDATE channels SET growth=growth+$1,view_growth=view_growth+$2 WHERE LOWER(name)=LOWER($3)`,
+                        [g,vg,user]);
+                    const videoTitle = (title && title.trim()!=='') ? title.trim() : 'No Title';
+                    const videoId    = Date.now().toString(36)+Math.random().toString(36).substr(2,5);
+                    const { rows: chRows } = await pool.query('SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)',[user]);
                     const icon = chRows[0] ? chRows[0].icon : '';
-
                     await pool.query(
-                        `INSERT INTO videos (id, title, channel_name, channel_icon, views, view_growth)
-                         VALUES ($1,$2,$3,$4,0,$5)`,
-                        [videoId, videoTitle, user, icon, vg]
-                    );
-
+                        `INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,0,$5)`,
+                        [videoId,videoTitle,user,icon,vg]);
                     message = `${prefix} @${user} posted "${videoTitle}" (+${g} growth)`;
                 } else {
                     return res.send(`Unknown command: !${cmd}`);
                 }
             }
         }
-
         res.send(message);
-    } catch (e) {
-        console.error('Command error:', e.message);
-        res.send('Server error. Please try again.');
-    }
+    } catch(e) { console.error('Command error:',e.message); res.send('Server error. Please try again.'); }
 });
+
+// ── API: ranking-version ─────────────────────────────
+app.get('/api/ranking-version', (_req, res) => res.json({ version: rankingVersion }));
 
 // ── API: ranking ─────────────────────────────────────
 app.get('/api/ranking', async (_req, res) => {
-    try {
-        const channels = await getAllChannels();
-        res.json({ ranking: buildSortedChannels(channels) });
-    } catch (e) { res.status(500).json({ ranking: [] }); }
+    try { const channels=await getAllChannels(); res.json({ranking:buildSortedChannels(channels)}); }
+    catch(e) { res.status(500).json({ranking:[]}); }
 });
 
 // ── API: total-stats ─────────────────────────────────
 app.get('/api/total-stats', async (_req, res) => {
     try {
-        const channels   = await getAllChannels();
-        const totalSubs  = channels.reduce((s, u) => s + (u.subs  || 0), 0);
-        const totalViews = channels.reduce((s, u) => s + (u.views || 0), 0);
-        const sorted     = [...channels].sort((a, b) => b.subs - a.subs);
-        res.json({ totalSubs, totalViews, count: channels.length, ranking: sorted });
-    } catch (e) { res.status(500).json({ totalSubs:0, totalViews:0, count:0, ranking:[] }); }
+        const channels=await getAllChannels();
+        const totalSubs=channels.reduce((s,u)=>s+(u.subs||0),0);
+        const totalViews=channels.reduce((s,u)=>s+(u.views||0),0);
+        res.json({totalSubs,totalViews,count:channels.length,ranking:[...channels].sort((a,b)=>b.subs-a.subs)});
+    } catch(e) { res.status(500).json({totalSubs:0,totalViews:0,count:0,ranking:[]}); }
 });
 
 // ── API: fastest-growth ──────────────────────────────
 app.get('/api/fastest-growth', async (_req, res) => {
     try {
-        const channels = await getAllChannels();
-        const sorted = [...channels]
-            .map(u => ({ ...u, growthPerHr: u.growth || 0 }))
-            .sort((a, b) => b.growthPerHr - a.growthPerHr)
-            .slice(0, 50);
-        res.json({ channels: sorted });
-    } catch (e) { res.status(500).json({ channels: [] }); }
+        const channels=await getAllChannels();
+        const sorted=[...channels].map(u=>({...u,growthPerHr:u.growth||0})).sort((a,b)=>b.growthPerHr-a.growthPerHr).slice(0,50);
+        res.json({channels:sorted});
+    } catch(e) { res.status(500).json({channels:[]}); }
 });
 
 // ── API: video-top50 ─────────────────────────────────
 app.get('/api/video-top50', async (_req, res) => {
+    try { const videos=await getAllVideos(); res.json({videos:[...videos].sort((a,b)=>b.views-a.views).slice(0,50)}); }
+    catch(e) { res.status(500).json({videos:[]}); }
+});
+
+// ── API: suggest ─────────────────────────────────────
+app.get('/api/suggest', async (req, res) => {
+    const q=(req.query.q||'').toLowerCase().trim();
+    if(!q) return res.json({channels:[]});
     try {
-        const videos = await getAllVideos();
-        const sorted = [...videos].sort((a, b) => b.views - a.views).slice(0, 50);
-        res.json({ videos: sorted });
-    } catch (e) { res.status(500).json({ videos: [] }); }
+        const channels=await getAllChannels();
+        const matched=channels
+            .filter(ch=>ch.name.toLowerCase().includes(q))
+            .sort((a,b)=>b.subs-a.subs).slice(0,4)
+            .map(ch=>({name:ch.name,icon:ch.icon||'',subs:ch.subs}));
+        res.json({channels:matched});
+    } catch(e) { res.json({channels:[]}); }
 });
 
 // ── API: YouTube Stats proxy ─────────────────────────
 app.get('/api/stats/channel', async (req, res) => {
     const { id } = req.query;
-    if (!id) return res.status(400).json({ error: 'Missing id' });
-    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE')
-        return res.json({ error:'API key not set', name:id, thumbnail:'', subscribers:0, views:0, likes:0, watching:0, isLive:false });
-
+    if (!id) return res.status(400).json({error:'Missing id'});
+    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY==='YOUR_YOUTUBE_API_KEY_HERE')
+        return res.json({error:'API key not set',name:id,thumbnail:'',subscribers:0,views:0,likes:0,watching:0,isLive:false});
     try {
-        const chRes  = await fetchFn(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(id)}&key=${YOUTUBE_API_KEY}`);
-        const chData = await chRes.json();
-        if (!chData.items || !chData.items.length)
-            return res.json({ error:'Not found', name:id, thumbnail:'', subscribers:0, views:0, likes:0, watching:0, isLive:false });
-
-        const ch      = chData.items[0];
-        const snippet = ch.snippet    || {};
-        const stats   = ch.statistics || {};
-        const th      = snippet.thumbnails || {};
-        const thumb   = (th.high || th.medium || th.default || {}).url || '';
-        const isLive  = snippet.liveBroadcastContent === 'live';
-
-        let watching = 0, likes = 0, liveViews = 0;
+        const chRes=await fetchFn(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(id)}&key=${YOUTUBE_API_KEY}`);
+        const chData=await chRes.json();
+        if (!chData.items||!chData.items.length)
+            return res.json({error:'Not found',name:id,thumbnail:'',subscribers:0,views:0,likes:0,watching:0,isLive:false});
+        const ch=chData.items[0];
+        const snippet=ch.snippet||{};
+        const stats=ch.statistics||{};
+        const th=snippet.thumbnails||{};
+        const thumb=(th.high||th.medium||th.default||{}).url||'';
+        const isLive=snippet.liveBroadcastContent==='live';
+        let watching=0,likes=0,liveViews=0;
         if (isLive) {
-            const srRes  = await fetchFn(`https://www.googleapis.com/youtube/v3/search?part=id&channelId=${encodeURIComponent(id)}&eventType=live&type=video&key=${YOUTUBE_API_KEY}`);
-            const srData = await srRes.json();
-            if (srData.items && srData.items.length) {
-                const vid   = srData.items[0].id.videoId;
-                const vRes  = await fetchFn(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails,statistics&id=${encodeURIComponent(vid)}&key=${YOUTUBE_API_KEY}`);
-                const vData = await vRes.json();
-                if (vData.items && vData.items.length) {
-                    watching  = parseInt((vData.items[0].liveStreamingDetails||{}).concurrentViewers||0);
-                    likes     = parseInt((vData.items[0].statistics||{}).likeCount||0);
-                    liveViews = parseInt((vData.items[0].statistics||{}).viewCount||0);
+            const srRes=await fetchFn(`https://www.googleapis.com/youtube/v3/search?part=id&channelId=${encodeURIComponent(id)}&eventType=live&type=video&key=${YOUTUBE_API_KEY}`);
+            const srData=await srRes.json();
+            if (srData.items&&srData.items.length) {
+                const vid=srData.items[0].id.videoId;
+                const vRes=await fetchFn(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails,statistics&id=${encodeURIComponent(vid)}&key=${YOUTUBE_API_KEY}`);
+                const vData=await vRes.json();
+                if (vData.items&&vData.items.length) {
+                    watching=parseInt((vData.items[0].liveStreamingDetails||{}).concurrentViewers||0);
+                    likes=parseInt((vData.items[0].statistics||{}).likeCount||0);
+                    liveViews=parseInt((vData.items[0].statistics||{}).viewCount||0);
                 }
             }
         }
-
-        res.json({
-            name: snippet.title || id, thumbnail: thumb,
-            subscribers: parseInt(stats.subscriberCount||0),
-            totalViews:  parseInt(stats.viewCount||0),
-            likes, watching, liveViews, isLive
-        });
-    } catch (e) {
-        res.json({ error:e.message, name:id, thumbnail:'', subscribers:0, totalViews:0, likes:0, watching:0, liveViews:0, isLive:false });
-    }
+        res.json({name:snippet.title||id,thumbnail:thumb,subscribers:parseInt(stats.subscriberCount||0),
+            totalViews:parseInt(stats.viewCount||0),likes,watching,liveViews,isLive});
+    } catch(e) { res.json({error:e.message,name:id,thumbnail:'',subscribers:0,totalViews:0,likes:0,watching:0,liveViews:0,isLive:false}); }
 });
 
-
-// ── トップページ → player.html ──────────────────────
-app.get('/', (_req, res) => {
-    res.sendFile(path.join(__dirname, 'player.html'));
-});
-
-// ── チャンネル名サジェストAPI ─────────────────────────
-app.get('/api/suggest', async (req, res) => {
-    const q = (req.query.q || '').toLowerCase().trim();
-    if (!q) return res.json({ channels: [] });
-    try {
-        const channels = await getAllChannels();
-        const matched = channels
-            .filter(ch => ch.name.toLowerCase().includes(q))
-            .sort((a, b) => b.subs - a.subs)
-            .slice(0, 4)
-            .map(ch => ({ name: ch.name, icon: ch.icon || '', subs: ch.subs }));
-        res.json({ channels: matched });
-    } catch(e) {
-        res.json({ channels: [] });
-    }
-});
+// ── トップページ → player.html（視聴者向け）──────────
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'player.html')));
 
 // ── Static files ─────────────────────────────────────
-// ルートパスで静的ファイルを提供（/streamer/ 配下からでも /Default_icon.jpg が取れるよう両方登録）
 app.use(express.static(path.join(__dirname)));
 app.use('/streamer', express.static(path.join(__dirname)));
 
 initDB().then(() => {
     app.listen(PORT, () => console.log(`FYSC Server running on port ${PORT}`));
-}).catch(e => {
-    console.error('DB init failed:', e.message);
-    process.exit(1);
-});
+}).catch(e => { console.error('DB init failed:', e.message); process.exit(1); });
