@@ -117,41 +117,39 @@
             const {ranking}=await r.json();
             if(!ranking||ranking.length<2)return;
 
-            // ── アクティブ度スコアでペアを選ぶ ──
-            // 条件1: growth または subs変化がある（アクティブ）ペアを優先
-            // スコア = 両チャンネルのgrowthの合計 + subs差の近さ（小さいほど高得点）
-            // まず「どちらかにgrowthがある」ペアだけ対象にする
-            // なければ全ペアから選ぶ
+            // ── ペア選択: subs差が最小 × growthアクティブ の両立 ──
+            // 全隣接ペアを対象にスコアを計算
+            // スコア = growthボーナス(どちらかにgrowthあれば大きく加点) - subs差の正規化値
+            // → growthがあるペアを最優先しつつ、その中でsubs差が小さい方を選ぶ
             let bestScore = -Infinity;
             let pair = [ranking[0], ranking[1]];
             let pairIdx = [0, 1];
             let subGap = Math.abs(ranking[0].subs - ranking[1].subs);
 
-            // アクティブペア（どちらかにgrowthあり）を優先検索
-            let candidates = [];
+            // subs差の最大値（正規化用）
+            let maxGap = 1;
+            for(let i=0;i<ranking.length-1;i++){
+                const g=Math.abs(ranking[i].subs-ranking[i+1].subs);
+                if(g>maxGap) maxGap=g;
+            }
+
             for(let i=0;i<ranking.length-1;i++){
                 const a=ranking[i], b=ranking[i+1];
                 const totalGrowth=(a.growth||0)+(b.growth||0);
-                if(totalGrowth>0) candidates.push({i,a,b,totalGrowth});
-            }
-            // アクティブペアがなければ全ペアを候補に
-            if(candidates.length===0){
-                for(let i=0;i<ranking.length-1;i++){
-                    const a=ranking[i], b=ranking[i+1];
-                    candidates.push({i,a,b,totalGrowth:0});
-                }
-            }
-
-            // スコア計算: growthが多い & subsが近い ほど高スコア
-            for(const {i,a,b,totalGrowth} of candidates){
-                const gap=Math.abs(a.subs-b.subs)+1; // 0除算防止
-                // growthが多く、subs差が小さいほど高スコア
-                const score = (totalGrowth * 10) - Math.log(gap);
+                const gap=Math.abs(a.subs-b.subs);
+                // subs差を0〜1に正規化（小さいほど0に近い）
+                const gapNorm = gap / maxGap;
+                // growthボーナス: どちらかにgrowthがあれば1000点加点
+                // さらにgrowth量も加算してより活発なペアを優先
+                const growthBonus = totalGrowth > 0 ? (1000 + totalGrowth) : 0;
+                // subs差が小さいほど加点（0〜100点）
+                const gapBonus = (1 - gapNorm) * 100;
+                const score = growthBonus + gapBonus;
                 if(score>bestScore){
                     bestScore=score;
                     pair=[a,b];
                     pairIdx=[i,i+1];
-                    subGap=Math.abs(a.subs-b.subs);
+                    subGap=gap;
                 }
             }
 
