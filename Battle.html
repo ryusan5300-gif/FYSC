@@ -116,11 +116,45 @@
             const r=await fetch('/api/ranking');
             const {ranking}=await r.json();
             if(!ranking||ranking.length<2)return;
-            let minGap=Infinity,pair=[ranking[0],ranking[1]],pairIdx=[0,1];
+
+            // ── アクティブ度スコアでペアを選ぶ ──
+            // 条件1: growth または subs変化がある（アクティブ）ペアを優先
+            // スコア = 両チャンネルのgrowthの合計 + subs差の近さ（小さいほど高得点）
+            // まず「どちらかにgrowthがある」ペアだけ対象にする
+            // なければ全ペアから選ぶ
+            let bestScore = -Infinity;
+            let pair = [ranking[0], ranking[1]];
+            let pairIdx = [0, 1];
+            let subGap = Math.abs(ranking[0].subs - ranking[1].subs);
+
+            // アクティブペア（どちらかにgrowthあり）を優先検索
+            let candidates = [];
             for(let i=0;i<ranking.length-1;i++){
-                const gap=Math.abs(ranking[i].subs-ranking[i+1].subs);
-                if(gap<minGap){minGap=gap;pair=[ranking[i],ranking[i+1]];pairIdx=[i,i+1];}
+                const a=ranking[i], b=ranking[i+1];
+                const totalGrowth=(a.growth||0)+(b.growth||0);
+                if(totalGrowth>0) candidates.push({i,a,b,totalGrowth});
             }
+            // アクティブペアがなければ全ペアを候補に
+            if(candidates.length===0){
+                for(let i=0;i<ranking.length-1;i++){
+                    const a=ranking[i], b=ranking[i+1];
+                    candidates.push({i,a,b,totalGrowth:0});
+                }
+            }
+
+            // スコア計算: growthが多い & subsが近い ほど高スコア
+            for(const {i,a,b,totalGrowth} of candidates){
+                const gap=Math.abs(a.subs-b.subs)+1; // 0除算防止
+                // growthが多く、subs差が小さいほど高スコア
+                const score = (totalGrowth * 10) - Math.log(gap);
+                if(score>bestScore){
+                    bestScore=score;
+                    pair=[a,b];
+                    pairIdx=[i,i+1];
+                    subGap=Math.abs(a.subs-b.subs);
+                }
+            }
+
             pair.forEach((user,side)=>{
                 const rEl=document.getElementById('rank-'+side);
                 const nEl=document.getElementById('name-'+side);
@@ -128,11 +162,10 @@
                 if(rEl)rEl.innerText='#'+(pairIdx[side]+1);
                 if(nEl)nEl.innerText=user.name;
                 if(iEl)iEl.src=(user.icon&&user.icon!=='')?user.icon:DEF;
-                // ★ エフェクト基準を growth に変更
                 updateEffect(side, user.growth || 0);
                 updateOdo(side, user.subs);
             });
-            updateOdo('gap',minGap);
+            updateOdo('gap',subGap);
         }catch(e){console.error('Battle update failed',e);}
     }
 
