@@ -156,6 +156,22 @@ async function runGrowthTick() {
 }
 setInterval(runGrowthTick, 3000);
 
+// ── 自然減少 (Decay) ─────────────────────────────────
+// growth=0 かつ subs>50 のチャンネルは60秒ごとに微量減少
+// decay = MIN(5, MAX(1, FLOOR(subs * 0.00008)))
+// 例: 1000subs → -1/min, 50000subs → -4/min, 100000subs → -5/min
+// 最低ライン: 50subs (それ以下には減らない)
+async function runDecayTick() {
+    try {
+        await pool.query(`
+            UPDATE channels
+            SET subs = GREATEST(50, subs - LEAST(5, GREATEST(1, FLOOR(subs * 0.00008)::int)))
+            WHERE growth = 0 AND subs > 50
+        `);
+    } catch (e) { console.error('Decay tick error:', e.message); }
+}
+setInterval(runDecayTick, 60000);
+
 // ── ランキング順位変動検知 ────────────────────────────
 let rankingVersion = 0;
 let lastOrderStr   = '';
