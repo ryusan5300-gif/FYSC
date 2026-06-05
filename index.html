@@ -7,107 +7,25 @@
     <script>window.odometerOptions={auto:false,format:'(,ddd)',theme:'minimal',duration:2000};</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/odometer.js/0.4.8/odometer.min.js"></script>
     <style>
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{background:#e8edf2;color:#000;font-family:'Roboto','Arial',sans-serif;margin:0;padding:0;overflow-x:hidden;}
-
-        #loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(232,237,242,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;pointer-events:none;transition:opacity 0.5s ease;color:#333;}
-        .spinner{width:44px;height:44px;border:4px solid rgba(0,0,0,0.1);border-top-color:#0047AB;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:10px;}
+        body{background:#0047AB;color:#fff;font-family:'Roboto','Arial',sans-serif;margin:0;padding:0;overflow-x:hidden;}
+        #loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,71,171,0.9);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;pointer-events:none;transition:opacity 0.5s ease;color:#fff;}
+        .spinner{width:50px;height:50px;border:5px solid rgba(255,255,255,0.1);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:10px;}
         @keyframes spin{to{transform:rotate(360deg);}}
-
-        /* ── Grid ── */
-        .grid-container{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:6px;opacity:0;transition:opacity 0.5s ease;}
-
-        /* ── Column = white card with border ── */
-        .column{
-            display:flex;flex-direction:column;
-            background:#fff;
-            border:1px solid #d0d5db;
-            border-radius:4px;
-            overflow:hidden;
-        }
-
-        /* ── Row item ── */
-        .rank-item{
-            display:flex;align-items:center;
-            padding:5px 8px;
-            background:#fff;
-            border-bottom:1px solid #e4e8ed;
-            font-size:0.88em;
-            visibility:hidden;opacity:0;transform:scale(0.9);
-            transition:visibility 0s 0.4s,opacity 0.35s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.35s cubic-bezier(0.175,0.885,0.32,1.275);
-            position:relative;
-        }
-        .rank-item:last-of-type{border-bottom:none;}
-        .rank-item.show{visibility:visible;opacity:1;transform:scale(1);transition:visibility 0s 0s,opacity 0.35s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.35s cubic-bezier(0.175,0.885,0.32,1.275);}
+        .grid-container{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:15px;opacity:0;transition:opacity 0.5s ease;}
+        .column{display:flex;flex-direction:column;gap:6px;}
+        .rank-item{background:rgba(253,253,253,0.9);color:#000;padding:8px;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);display:flex;align-items:center;font-size:0.9em;visibility:hidden;opacity:0;transform:scale(0.85);transition:visibility 0s 0.4s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
+        .rank-item.show{visibility:visible;opacity:1;transform:scale(1);transition:visibility 0s 0s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
         .rank-item.empty{display:none!important;}
-
-        /* ── Rank number ── */
-        .rank-number-wrap{
-            position:relative;width:34px;height:40px;flex-shrink:0;
-            display:flex;align-items:center;justify-content:center;
-            margin-right:6px;
-        }
-        .rank-effect{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px;object-fit:contain;pointer-events:none;z-index:0;}
-        .rank-number{
-            font-size:1.15em;font-weight:900;color:#1a1a2e;
-            position:relative;z-index:1;line-height:1;
-            text-shadow:0 0 4px rgba(255,255,255,0.9),1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;
-            min-width:24px;text-align:center;
-        }
-
-        /* ── Icon ── */
-        .icon-container{
-            width:44px;height:44px;flex-shrink:0;
-            margin-right:7px;
-            overflow:hidden;background:#ccc;
-            border-radius:50%;
-            border:1.5px solid #d8dde3;
-        }
+        .rank-number-wrap{position:relative;width:46px;height:46px;flex-shrink:0;margin-right:10px;display:flex;align-items:center;justify-content:center;}
+        .rank-effect{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:56px;height:56px;object-fit:contain;pointer-events:none;z-index:0;}
+        .rank-number{font-size:1.5em;font-weight:900;color:#000;position:relative;z-index:1;line-height:1;text-shadow:0 0 3px #fff,0 0 6px #fff,1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;}
+        .icon-container{width:50px;height:50px;flex-shrink:0;margin-right:10px;overflow:hidden;background:#ddd;border-radius:0;}
         .channel-icon{width:100%;height:100%;object-fit:cover;display:block;}
-
-        /* ── Info ── */
-        .info-container{display:flex;flex-direction:column;flex-grow:1;overflow:hidden;justify-content:center;}
-        .name{
-            font-size:0.92em;font-weight:600;color:#444;
-            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-            margin-bottom:1px;line-height:1.2;
-        }
-        .subs{color:#111;font-size:1.28em;font-weight:800;line-height:1.15;}
-
-        /* odometer color states */
-        .up .odometer,.up.odometer{color:#009900!important;}
-        .down .odometer,.down.odometer{color:#cc0000!important;}
-        .up{color:#009900!important;}
+        .info-container{display:flex;flex-direction:column;flex-grow:1;overflow:hidden;}
+        .name{font-size:1.1em;font-weight:700;color:#000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;}
+        .subs{color:#000;font-size:1.5em;font-weight:700;}
+        .up{color:#00aa00!important;}
         .down{color:#cc0000!important;}
-
-        /* ── GAP indicator ── */
-        .gap-wrap{
-            position:relative;height:0;overflow:visible;z-index:20;pointer-events:none;
-        }
-        .gap-badge{
-            position:absolute;left:50%;transform:translateX(-50%);top:-10px;
-            display:flex;align-items:center;gap:2px;
-            opacity:0;transition:opacity 0.3s;
-            background:rgba(20,20,20,0.72);
-            border-radius:3px;
-            padding:2px 5px 2px 4px;
-            box-shadow:0 1px 4px rgba(0,0,0,0.35);
-        }
-        .gap-badge.show{opacity:1;}
-        .gap-badge img{
-            width:14px;height:14px;object-fit:contain;
-            animation:gapShake 0.16s ease-in-out infinite alternate;
-        }
-        @keyframes gapShake{
-            0%{transform:translateX(-2px) rotate(-6deg);}
-            100%{transform:translateX(2px) rotate(6deg);}
-        }
-        .gap-text{
-            font-size:0.68em;font-weight:900;color:#fff;
-            text-shadow:0 1px 2px rgba(0,0,0,0.9);
-            white-space:nowrap;line-height:1;
-            letter-spacing:0.3px;
-        }
     </style>
 </head>
 <body>
@@ -128,20 +46,18 @@
     const DEF='Default_icon.jpg';
     let isInit=false,pendingData=null,knownVersion=null;
 
-    function updateEffect(i,growthVal){
+    function updateEffect(i, growthVal){
         const el=document.getElementById('effect-'+i);if(!el)return;
         const src=getEffectSrc(growthVal);
         if(src){if(el.getAttribute('src')!==src)el.src=src;el.style.display='block';}
         else{el.style.display='none';el.removeAttribute('src');}
     }
-
     function initBoard(){
         const board=document.getElementById('board');board.innerHTML='';
         for(let i=0;i<5;i++){
             const col=document.createElement('div');col.className='column';
             for(let j=0;j<10;j++){
-                const idx=i*10+j;
-                const item=document.createElement('div');
+                const idx=i*10+j;const item=document.createElement('div');
                 item.className='rank-item';item.id='item-'+idx;
                 item.innerHTML=
                     '<div class="rank-number-wrap">'+
@@ -149,28 +65,12 @@
                         '<div class="rank-number" id="rank-'+idx+'">--</div>'+
                     '</div>'+
                     '<div class="icon-container"><img src="'+DEF+'" class="channel-icon" id="icon-'+idx+'" onerror="this.src=\''+DEF+'\'"></div>'+
-                    '<div class="info-container">'+
-                        '<div class="name" id="name-'+idx+'">---</div>'+
-                        '<div class="subs" id="odo-'+idx+'">0</div>'+
-                    '</div>';
+                    '<div class="info-container"><div class="name" id="name-'+idx+'">---</div><div class="subs" id="odo-'+idx+'">0</div></div>';
                 col.appendChild(item);
-
-                // GAP wrap between items (j=0~8 only)
-                if(j<9){
-                    const gw=document.createElement('div');
-                    gw.className='gap-wrap';gw.id='gap-wrap-'+idx;
-                    gw.innerHTML=
-                        '<div class="gap-badge" id="gap-'+idx+'">'+
-                            '<img id="gap-img-'+idx+'" src="Green_GAP.png" alt="">'+
-                            '<span class="gap-text" id="gap-txt-'+idx+'"></span>'+
-                        '</div>';
-                    col.appendChild(gw);
-                }
             }
             board.appendChild(col);
         }
     }
-
     function initOdo(idx){
         if(odometers[idx])return odometers[idx];
         const el=document.getElementById('odo-'+idx);if(!el)return null;
@@ -178,7 +78,6 @@
         const odo=new Odometer({el,value:0,format:'(,ddd)',theme:'minimal',duration:2000});
         odo.render();odometers[idx]=odo;currentValues[idx]=0;return odo;
     }
-
     function applyIdx(idx,user){
         const item=document.getElementById('item-'+idx);
         const rankEl=document.getElementById('rank-'+idx);
@@ -188,11 +87,12 @@
         if(!item||!rankEl||!iconEl||!nameEl||!odoEl)return;
         if(!user||user.name==='---'){item.classList.add('empty');return;}
         item.classList.remove('empty');
-        rankEl.innerText=String(idx+1).padStart(2,'0');
+        rankEl.innerText=idx+1;
         const ic=(user.icon&&user.icon!=='')?user.icon:DEF;
         if(iconEl.getAttribute('src')!==ic)iconEl.src=ic;
         nameEl.innerText=user.name;
-        updateEffect(idx,user.growth||0);
+        // ★ エフェクト基準を growth に変更
+        updateEffect(idx, user.growth || 0);
         const odo=initOdo(idx);if(!odo)return;
         const prev=currentValues[idx]||0,nv=user.subs;
         if(nv!==prev){
@@ -203,37 +103,11 @@
         }
     }
 
-    // ── GAP indicator ──
-    function updateGaps(ranking){
-        for(let i=0;i<49;i++){
-            const colPos=i%10;
-            if(colPos===9)continue;
-            const badge=document.getElementById('gap-'+i);
-            const img=document.getElementById('gap-img-'+i);
-            const txt=document.getElementById('gap-txt-'+i);
-            if(!badge||!img||!txt)continue;
-            const a=ranking[i],b=ranking[i+1];
-            if(!a||!b||a.name==='---'||b.name==='---'){badge.classList.remove('show');continue;}
-            const diff=Math.abs(a.subs-b.subs);
-            if(diff<=5000){
-                const isRed=diff<=1000;
-                img.src=isRed?'Red_GAP.png':'Green_GAP.png';
-                const label=diff>=1000?(diff/1000).toFixed(1)+'K':diff.toString();
-                txt.textContent=label;
-                txt.style.color=isRed?'#ff5555':'#55ff88';
-                badge.classList.add('show');
-            }else{
-                badge.classList.remove('show');
-            }
-        }
-    }
-
     async function refreshSubs(){
         try{
             const r=await fetch('/api/ranking');
             const {ranking}=await r.json();
             for(let i=0;i<50;i++)applyIdx(i,ranking[i]||null);
-            updateGaps(ranking);
         }catch(e){}
     }
 
@@ -241,7 +115,10 @@
         try{
             const r=await fetch('/api/ranking-version');
             const {version}=await r.json();
-            if(knownVersion!==null&&version!==knownVersion){location.reload();return;}
+            if(knownVersion!==null&&version!==knownVersion){
+                location.reload();
+                return;
+            }
             knownVersion=version;
         }catch(e){}
     }
@@ -260,7 +137,7 @@
             const nEl=document.getElementById('name-'+i);
             const iEl=document.getElementById('icon-'+i);
             if(!u||u.name==='---'){if(item)item.classList.add('empty');continue;}
-            if(rEl)rEl.innerText=String(i+1).padStart(2,'0');
+            if(rEl)rEl.innerText=i+1;
             if(nEl)nEl.innerText=u.name;
             if(iEl)iEl.src=(u.icon&&u.icon!=='')?u.icon:DEF;
         }
@@ -275,14 +152,15 @@
                 setTimeout(()=>{
                     const ud=pendingData[idx];
                     if(!ud||ud.subs===0)return;
-                    updateEffect(idx,ud.growth||0);
+                    // ★ エフェクト基準を growth に
+                    updateEffect(idx, ud.growth || 0);
                     const odo=initOdo(idx);
                     if(odo){currentValues[idx]=ud.subs;odo.update(ud.subs);}
                 },420);
             },d,i);
         }
         setTimeout(()=>{ls.style.opacity='0';setTimeout(()=>ls.style.display='none',500);},shown*30+500);
-        updateGaps(ranking);
+
         try{const rv=await fetch('/api/ranking-version');const {version}=await rv.json();knownVersion=version;}catch(e){}
         setInterval(pollVersion,3000);
         setInterval(refreshSubs,3000);
