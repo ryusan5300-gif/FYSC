@@ -26,6 +26,14 @@
         .subs{color:#000;font-size:1.5em;font-weight:700;}
         .up{color:#00aa00!important;}
         .down{color:#cc0000!important;}
+        /* ── GAP indicator ── */
+        .gap-wrap{position:relative;height:0;overflow:visible;z-index:10;pointer-events:none;}
+        .gap-badge{position:absolute;left:50%;transform:translateX(-50%);top:-13px;display:flex;align-items:center;gap:4px;opacity:0;transition:opacity 0.4s;}
+        .gap-badge.show{opacity:1;}
+        .gap-badge img{width:18px;height:18px;object-fit:contain;}
+        .gap-badge img.shake{animation:gapShake 0.35s ease-in-out infinite alternate;}
+        @keyframes gapShake{0%{transform:translateX(-1.5px) rotate(-4deg);}100%{transform:translateX(1.5px) rotate(4deg);}}
+        .gap-text{font-size:0.72em;font-weight:900;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.8);white-space:nowrap;line-height:1;}
     </style>
 </head>
 <body>
@@ -67,6 +75,16 @@
                     '<div class="icon-container"><img src="'+DEF+'" class="channel-icon" id="icon-'+idx+'" onerror="this.src=\''+DEF+'\'"></div>'+
                     '<div class="info-container"><div class="name" id="name-'+idx+'">---</div><div class="subs" id="odo-'+idx+'">0</div></div>';
                 col.appendChild(item);
+                // GAP wrap between items (not after last in column)
+                if(j<9){
+                    const gw=document.createElement('div');
+                    gw.className='gap-wrap';gw.id='gap-wrap-'+idx;
+                    gw.innerHTML='<div class="gap-badge" id="gap-'+idx+'">'+
+                        '<img id="gap-img-'+idx+'" src="Green_GAP.png" alt="">'+
+                        '<span class="gap-text" id="gap-txt-'+idx+'"></span>'+
+                    '</div>';
+                    col.appendChild(gw);
+                }
             }
             board.appendChild(col);
         }
@@ -103,11 +121,42 @@
         }
     }
 
+    // ── GAP indicator update ──
+    function updateGaps(ranking){
+        for(let i=0;i<49;i++){
+            const a=ranking[i],b=ranking[i+1];
+            const badge=document.getElementById('gap-'+i);
+            const img=document.getElementById('gap-img-'+i);
+            const txt=document.getElementById('gap-txt-'+i);
+            // only show within same column (j<9 means gap-wrap exists for idx 0-8,10-18,...)
+            const col=Math.floor(i/10),colPos=i%10;
+            if(colPos===9){continue;} // cross-column: no gap-wrap exists
+            if(!badge||!img||!txt)continue;
+            if(!a||!b||a.name==='---'||b.name==='---'){
+                badge.classList.remove('show');continue;
+            }
+            const diff=Math.abs(a.subs-b.subs);
+            if(diff<=5000){
+                const isRed=diff<=1000;
+                img.src=isRed?'Red_GAP.png':'Green_GAP.png';
+                img.className=isRed?'shake':'';
+                // format: show K if >=1000
+                const label=diff>=1000?(diff/1000).toFixed(1)+'K':diff.toString();
+                txt.textContent=label;
+                txt.style.color=isRed?'#ff4444':'#44ff88';
+                badge.classList.add('show');
+            }else{
+                badge.classList.remove('show');
+            }
+        }
+    }
+
     async function refreshSubs(){
         try{
             const r=await fetch('/api/ranking');
             const {ranking}=await r.json();
             for(let i=0;i<50;i++)applyIdx(i,ranking[i]||null);
+            updateGaps(ranking);
         }catch(e){}
     }
 
@@ -161,6 +210,7 @@
         }
         setTimeout(()=>{ls.style.opacity='0';setTimeout(()=>ls.style.display='none',500);},shown*30+500);
 
+        updateGaps(ranking);
         try{const rv=await fetch('/api/ranking-version');const {version}=await rv.json();knownVersion=version;}catch(e){}
         setInterval(pollVersion,3000);
         setInterval(refreshSubs,3000);
