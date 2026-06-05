@@ -117,7 +117,10 @@
         try{
             const r=await fetch('/api/ranking');
             const {ranking}=await r.json();
-            for(let i=0;i<50;i++)applyIdx(i,ranking[i]||null);
+            for(let i=0;i<50;i++){
+                const delay=Math.random()*2700;
+                setTimeout((idx)=>applyIdx(idx,ranking[idx]||null),delay,i);
+            }
         }catch(e){}
     }
 
