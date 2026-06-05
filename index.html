@@ -11,9 +11,9 @@
         #loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,71,171,0.9);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;pointer-events:none;transition:opacity 0.5s ease;color:#fff;}
         .spinner{width:50px;height:50px;border:5px solid rgba(255,255,255,0.1);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:10px;}
         @keyframes spin{to{transform:rotate(360deg);}}
-        .grid-container{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:15px;opacity:0;transition:opacity 0.5s ease;}
-        .column{display:flex;flex-direction:column;gap:6px;}
-        .rank-item{background:rgba(253,253,253,0.9);color:#000;padding:8px;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);display:flex;align-items:center;font-size:0.9em;visibility:hidden;opacity:0;transform:scale(0.85);transition:visibility 0s 0.4s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
+        .grid-container{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px;opacity:0;transition:opacity 0.5s ease;}
+        .column{display:flex;flex-direction:column;gap:2px;}
+        .rank-item{background:rgba(253,253,253,0.9);color:#000;padding:6px;border-radius:0;box-shadow:0 1px 3px rgba(0,0,0,0.1);display:flex;align-items:center;font-size:0.9em;visibility:hidden;opacity:0;transform:scale(0.85);transition:visibility 0s 0.4s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
         .rank-item.show{visibility:visible;opacity:1;transform:scale(1);transition:visibility 0s 0s,opacity 0.4s cubic-bezier(0.175,0.885,0.32,1.275),transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);}
         .rank-item.empty{display:none!important;}
         .rank-number-wrap{position:relative;width:46px;height:46px;flex-shrink:0;margin-right:10px;display:flex;align-items:center;justify-content:center;}
@@ -28,12 +28,12 @@
         .down{color:#cc0000!important;}
         /* ── GAP indicator ── */
         .gap-wrap{position:relative;height:0;overflow:visible;z-index:10;pointer-events:none;}
-        .gap-badge{position:absolute;left:50%;transform:translateX(-50%);top:-13px;display:flex;align-items:center;gap:4px;opacity:0;transition:opacity 0.4s;}
+        .gap-badge{position:absolute;left:50%;transform:translateX(-50%);top:-11px;display:flex;align-items:center;gap:3px;opacity:0;transition:opacity 0.4s;
+            background:rgba(0,0,0,0.62);border-radius:3px;padding:1px 5px 1px 3px;}
         .gap-badge.show{opacity:1;}
-        .gap-badge img{width:18px;height:18px;object-fit:contain;}
-        .gap-badge img.shake{animation:gapShake 0.35s ease-in-out infinite alternate;}
-        @keyframes gapShake{0%{transform:translateX(-1.5px) rotate(-4deg);}100%{transform:translateX(1.5px) rotate(4deg);}}
-        .gap-text{font-size:0.72em;font-weight:900;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.8);white-space:nowrap;line-height:1;}
+        .gap-badge img{width:16px;height:16px;object-fit:contain;animation:gapShake 0.18s ease-in-out infinite alternate;}
+        @keyframes gapShake{0%{transform:translateX(-1.5px) rotate(-5deg);}100%{transform:translateX(1.5px) rotate(5deg);}}
+        .gap-text{font-size:0.72em;font-weight:900;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.9);white-space:nowrap;line-height:1;}
     </style>
 </head>
 <body>
@@ -139,7 +139,6 @@
             if(diff<=5000){
                 const isRed=diff<=1000;
                 img.src=isRed?'Red_GAP.png':'Green_GAP.png';
-                img.className=isRed?'shake':'';
                 // format: show K if >=1000
                 const label=diff>=1000?(diff/1000).toFixed(1)+'K':diff.toString();
                 txt.textContent=label;
