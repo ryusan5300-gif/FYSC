@@ -159,7 +159,8 @@ setInterval(runGrowthTick, 3000);
 // ── ランキング順位変動検知 ────────────────────────────
 let rankingVersion = 0;
 let lastOrderStr   = '';
-setInterval(async () => {
+
+async function checkRankingVersion() {
     try {
         const channels = await getAllChannels();
         const sorted   = buildSortedChannels(channels);
@@ -167,7 +168,9 @@ setInterval(async () => {
         if (orderStr !== lastOrderStr && lastOrderStr !== '') rankingVersion++;
         lastOrderStr = orderStr;
     } catch (e) {}
-}, 3000);
+}
+// growthTick完了後に少し待ってから順位チェック（tick後のDB反映を待つ）
+setInterval(() => setTimeout(checkRankingVersion, 3500), 3000);
 
 // ── 一回限りのインポートAPI ───────────────────────────
 app.get('/api/import-data', async (req, res) => {
@@ -265,7 +268,13 @@ app.get('/api/command', async (req, res) => {
                         `UPDATE channels SET growth=growth+$1,view_growth=view_growth+$2 WHERE LOWER(name)=LOWER($3)`,
                         [g,vg,user]);
                     // title: from ?title= param, or from querystring (NightBot $(querystring)), fallback 'No Title'
-                    const rawTitle = (title && title.trim() !== '') ? title.trim() : '';
+                    // NightBot: !video lol → ?user=xxx&cmd=video&title=lol
+                    // $(querystring) を &title= に設定すること
+                    // 例: URL = /api/command?user=$(user)&cmd=video&title=$(querystring)
+                    const qs = req.query;
+                    const rawTitle = [
+                        qs.title, qs.q, qs.message, qs.text, qs.arg, qs['1']
+                    ].map(v => (v || '').trim()).filter(v => v !== '' && v !== 'undefined').find(Boolean) || '';
                     const videoTitle = rawTitle !== '' ? rawTitle : 'No Title';
                     const videoId    = Date.now().toString(36)+Math.random().toString(36).substr(2,5);
                     const { rows: chRows } = await pool.query('SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)',[user]);
