@@ -127,7 +127,7 @@ async function runGrowthTick() {
                 try {
                     await pool.query(`
                         UPDATE channels SET
-                            subs        = subs        + GREATEST(1, CEIL(growth      / 1200.0)),
+                            subs        = GREATEST(1, subs + GREATEST(1, CEIL(growth / 1200.0))),
                             growth      = GREATEST(0, growth      - GREATEST(1, CEIL(growth      / 1200.0))),
                             views       = views       + GREATEST(1, CEIL(view_growth / 1200.0)),
                             view_growth = GREATEST(0, view_growth - GREATEST(1, CEIL(view_growth / 1200.0)))
@@ -165,8 +165,8 @@ async function runDecayTick() {
     try {
         await pool.query(`
             UPDATE channels
-            SET subs = GREATEST(50, subs - LEAST(5, GREATEST(1, FLOOR(subs * 0.00008)::int)))
-            WHERE growth = 0 AND subs > 50
+            SET subs = GREATEST(1, subs - LEAST(5, GREATEST(1, FLOOR(subs * 0.00008)::int)))
+            WHERE growth = 0 AND subs > 1
         `);
     } catch (e) { console.error('Decay tick error:', e.message); }
 }
