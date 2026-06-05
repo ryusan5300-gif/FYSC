@@ -282,7 +282,7 @@ app.get('/api/command', async (req, res) => {
                     await pool.query(
                         `INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,0,$5)`,
                         [videoId,videoTitle,user,icon,vg]);
-                    message = `@${user} Posted a Video "${videoTitle}" (+${g} growth)`;
+                    message = `@${user} Posted a Video "${videoTitle}"`;
                 } else {
                     return res.send(`Unknown command: !${cmd}`);
                 }
