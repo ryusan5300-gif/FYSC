@@ -163,11 +163,22 @@ setInterval(runGrowthTick, 3000);
 // 最低ライン: 50subs (それ以下には減らない)
 async function runDecayTick() {
     try {
-        await pool.query(`
-            UPDATE channels
-            SET subs = GREATEST(1, subs - LEAST(5, GREATEST(1, FLOOR(subs * 0.00008)::int)))
-            WHERE growth = 0 AND subs > 1
-        `);
+        const { rows } = await pool.query(
+            `SELECT name FROM channels WHERE growth = 0 AND subs > 1`
+        );
+        for (const row of rows) {
+            // チャンネルごとにランダム遅延 0〜60秒
+            const delay = Math.floor(Math.random() * 60000);
+            setTimeout(async () => {
+                try {
+                    await pool.query(`
+                        UPDATE channels
+                        SET subs = GREATEST(1, subs - LEAST(5, GREATEST(1, FLOOR(subs * 0.00008)::int)))
+                        WHERE name = $1 AND growth = 0 AND subs > 1
+                    `, [row.name]);
+                } catch (e) { console.error('Decay channel error:', e.message); }
+            }, delay);
+        }
     } catch (e) { console.error('Decay tick error:', e.message); }
 }
 setInterval(runDecayTick, 60000);
