@@ -360,5 +360,29 @@
     })();
     </script>
 
+
+    <script>
+    // ── コンソールテスト用 ──
+    // 使い方: testMilestone(カード番号, 登録者数)
+    // 例: testMilestone(0, 100000)  → 1番目のカードを100,000でお祝い
+    window.testMilestone = function(idx, value) {
+        const odoEl = document.getElementById('odo-' + idx);
+        if (!odoEl) { console.error('カード ' + idx + ' が見つかりません'); return; }
+        // currentValues と odometer を強制更新
+        currentValues[idx] = value - 1;
+        const odo = odometers[idx] || initOdo(idx);
+        if (odo) { odo.update(value); currentValues[idx] = value; }
+        // お祝いを強制発火（キャッシュをリセットしてから）
+        const card = document.getElementById('item-' + idx);
+        if (card) {
+            // 既存のお祝いフラグをリセット
+            Object.keys(card.dataset).forEach(k => { if (k.startsWith('celebrated-')) card.dataset[k] = 'false'; });
+            // textContent を書き換えて MutationObserver を発火
+            odoEl.textContent = value;
+        }
+        console.log('テスト: カード' + idx + ' → ' + value.toLocaleString() + ' subs');
+    };
+    </script>
+
 </body>
 </html>
