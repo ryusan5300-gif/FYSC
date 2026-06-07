@@ -1,11 +1,14 @@
 const express  = require('express');
 const { Pool } = require('pg');
 const path     = require('path');
+const crypto   = require('crypto');
 const app      = express();
 const PORT     = process.env.PORT || 3000;
 
 const YOUTUBE_API_KEY   = process.env.YOUTUBE_API_KEY   || 'AIzaSyDAJfuzKGV1aqOyvY-b6kJIwajlwe4LNkQ';
 const STREAMER_PASSWORD = process.env.STREAMER_PASSWORD || 'fysc2024';
+
+app.use(express.json());
 
 // ── PostgreSQL 接続 ──────────────────────────────────
 const pool = new Pool({
@@ -33,6 +36,17 @@ async function initDB() {
             channel_icon TEXT    NOT NULL DEFAULT '',
             views        INTEGER NOT NULL DEFAULT 0,
             view_growth  INTEGER NOT NULL DEFAULT 0
+        )
+    `);
+    // !connect セッションテーブル
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS connect_sessions (
+            token      TEXT PRIMARY KEY,
+            code       TEXT NOT NULL,
+            channel_name TEXT,
+            channel_icon TEXT,
+            connected  BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at BIGINT  NOT NULL
         )
     `);
     console.log('DB tables ready.');
@@ -67,24 +81,20 @@ function buildSortedChannels(channels) {
 }
 
 // ── 配信者専用保護ミドルウェア ────────────────────────
-// URLパラメータ ?password=xxx またはCookieで認証
 function streamerOnly(req, res, next) {
-    // URLパラメータにパスワードがあればCookieにセットして通す
     if (req.query.password === STREAMER_PASSWORD) {
         res.setHeader('Set-Cookie',
             `fysc_auth=${STREAMER_PASSWORD}; Path=/; Max-Age=${60*60*24*30}; SameSite=Lax`
         );
         return next();
     }
-    // Cookieにパスワードがあれば通す
     const cookie = req.headers.cookie || '';
     const match  = cookie.match(/fysc_auth=([^;]+)/);
     if (match && match[1] === STREAMER_PASSWORD) return next();
-    // どちらもなければログインページへ
     res.redirect('/login.html?redirect=' + encodeURIComponent(req.originalUrl));
 }
 
-// ── 認証API ─────────────────────────────────────────
+// ── 認証API (既存) ───────────────────────────────────
 app.get('/api/auth', (req, res) => {
     const { pw, redirect } = req.query;
     if (pw === STREAMER_PASSWORD) {
@@ -97,7 +107,110 @@ app.get('/api/auth', (req, res) => {
     }
 });
 
-// ── 配信者専用ルート（/streamer/xxx） ────────────────
+// ════════════════════════════════════════════════════════════════
+//  !connect ログイン API
+// ════════════════════════════════════════════════════════════════
+
+// 期限切れセッションを定期削除 (130秒以上経過)
+setInterval(async () => {
+    try {
+        await pool.query(
+            `DELETE FROM connect_sessions WHERE created_at < $1`,
+            [Date.now() - 130_000]
+        );
+    } catch(e) {}
+}, 60_000);
+
+// POST /api/auth/connect-code
+// player.html から呼ばれる。6桁コードと検証用トークンを生成して返す
+app.post('/api/auth/connect-code', async (req, res) => {
+    try {
+        const code  = String(Math.floor(100_000 + Math.random() * 900_000));
+        const token = crypto.randomBytes(20).toString('hex');
+        await pool.query(
+            `INSERT INTO connect_sessions (token, code, connected, created_at)
+             VALUES ($1, $2, FALSE, $3)`,
+            [token, code, Date.now()]
+        );
+        res.json({ code, token, expiresIn: 120 });
+    } catch(e) {
+        console.error('connect-code error:', e.message);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// GET /api/auth/connect-status?token=xxx
+// player.html がポーリングして認証完了を検知する
+app.get('/api/auth/connect-status', async (req, res) => {
+    const { token } = req.query;
+    if (!token) return res.json({ connected: false });
+    try {
+        const { rows } = await pool.query(
+            `SELECT connected, channel_name, channel_icon FROM connect_sessions WHERE token=$1`,
+            [token]
+        );
+        if (!rows.length) return res.json({ connected: false });
+        const row = rows[0];
+        if (!row.connected) return res.json({ connected: false });
+        res.json({
+            connected: true,
+            user: { name: row.channel_name, icon: row.channel_icon || '' }
+        });
+    } catch(e) {
+        res.json({ connected: false });
+    }
+});
+
+// POST /api/auth/connect-verify
+// チャットBot (Twitch/YouTube Bot) から呼ばれる。
+// !connect <code> コマンドを受信したら、このエンドポイントをPOSTする。
+//
+// Body: { code: "123456", channelName: "@YourChannel", channelIcon: "https://..." }
+//
+// チャットBotでの使い方例 (Node.js Bot):
+//   const res = await fetch('http://localhost:3000/api/auth/connect-verify', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ code, channelName: user, channelIcon: icon })
+//   });
+//
+app.post('/api/auth/connect-verify', async (req, res) => {
+    const { code, channelName, channelIcon } = req.body || {};
+    if (!code) return res.status(400).json({ ok: false, error: 'Missing code' });
+
+    try {
+        const { rows } = await pool.query(
+            `SELECT token, created_at FROM connect_sessions
+             WHERE code=$1 AND connected=FALSE
+             ORDER BY created_at DESC LIMIT 1`,
+            [String(code)]
+        );
+        if (!rows.length) {
+            return res.status(404).json({ ok: false, error: 'Code not found or already used' });
+        }
+        const row = rows[0];
+        // 期限チェック (120秒)
+        if (Date.now() - Number(row.created_at) > 120_000) {
+            await pool.query(`DELETE FROM connect_sessions WHERE token=$1`, [row.token]);
+            return res.status(410).json({ ok: false, error: 'Code expired' });
+        }
+        // 認証完了フラグをセット
+        await pool.query(
+            `UPDATE connect_sessions
+             SET connected=TRUE, channel_name=$1, channel_icon=$2
+             WHERE token=$3`,
+            [channelName || '', channelIcon || '', row.token]
+        );
+        res.json({ ok: true });
+    } catch(e) {
+        console.error('connect-verify error:', e.message);
+        res.status(500).json({ ok: false, error: 'Server error' });
+    }
+});
+
+// ════════════════════════════════════════════════════════════════
+//  配信者専用ルート
+// ════════════════════════════════════════════════════════════════
 app.get('/streamer/ranking',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/streamer/battle',           streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Battle.html')));
 app.get('/streamer/fastest',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Fastest_growth.html')));
@@ -106,7 +219,7 @@ app.get('/streamer/totalviews',       streamerOnly, (_req, res) => res.sendFile(
 app.get('/streamer/videotop',         streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'VideoViewTOP50.html')));
 app.get('/streamer/stats',            streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'stats.html')));
 
-// ── 直打ちアクセスも保護 ─────────────────────────────
+// 直打ちアクセスも保護
 const PROTECTED_FILES = [
     'index.html','Battle.html','Fastest_growth.html',
     'Totalsubscribers.html','TotalView.html','VideoViewTOP50.html','stats.html'
@@ -115,7 +228,11 @@ PROTECTED_FILES.forEach(f => {
     app.get('/' + f, streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, f)));
 });
 
-// ── 定期的な Growth → Subs / Views 変換 (チャンネルごとにランダム遅延 0〜3秒) ──
+// ════════════════════════════════════════════════════════════════
+//  定期処理
+// ════════════════════════════════════════════════════════════════
+
+// Growth → Subs / Views 変換 (3秒ごと、チャンネルごとにランダム遅延 0〜3秒)
 async function runGrowthTick() {
     try {
         const { rows } = await pool.query(
@@ -156,18 +273,13 @@ async function runGrowthTick() {
 }
 setInterval(runGrowthTick, 3000);
 
-// ── 自然減少 (Decay) ─────────────────────────────────
-// growth=0 かつ subs>50 のチャンネルは60秒ごとに微量減少
-// decay = MIN(5, MAX(1, FLOOR(subs * 0.00008)))
-// 例: 1000subs → -1/min, 50000subs → -4/min, 100000subs → -5/min
-// 最低ライン: 50subs (それ以下には減らない)
+// 自然減少 (Decay) — growth=0 かつ subs>1 のチャンネルは60秒ごとに微量減少
 async function runDecayTick() {
     try {
         const { rows } = await pool.query(
             `SELECT name FROM channels WHERE growth = 0 AND subs > 1`
         );
         for (const row of rows) {
-            // チャンネルごとにランダム遅延 0〜60秒
             const delay = Math.floor(Math.random() * 60000);
             setTimeout(async () => {
                 try {
@@ -183,7 +295,7 @@ async function runDecayTick() {
 }
 setInterval(runDecayTick, 60000);
 
-// ── ランキング順位変動検知 ────────────────────────────
+// ランキング順位変動検知
 let rankingVersion = 0;
 let lastOrderStr   = '';
 
@@ -196,10 +308,13 @@ async function checkRankingVersion() {
         lastOrderStr = orderStr;
     } catch (e) {}
 }
-// growthTick完了後に少し待ってから順位チェック（tick後のDB反映を待つ）
 setInterval(() => setTimeout(checkRankingVersion, 3500), 3000);
 
-// ── 一回限りのインポートAPI ───────────────────────────
+// ════════════════════════════════════════════════════════════════
+//  API
+// ════════════════════════════════════════════════════════════════
+
+// インポートAPI (一回限り)
 app.get('/api/import-data', async (req, res) => {
     if (process.env.IMPORT_DONE === 'true') return res.send('Import already done.');
     const { secret } = req.query;
@@ -234,7 +349,7 @@ app.get('/api/import-data', async (req, res) => {
     } catch(e) { res.status(500).send('Import error: ' + e.message); }
 });
 
-// ── YouTube 検索ヘルパー ──────────────────────────────
+// YouTube 検索ヘルパー
 async function searchYouTubeChannel(query) {
     if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') return null;
     try {
@@ -260,6 +375,42 @@ const videoCommands = ['video','short','stream','viral','trend'];
 app.get('/api/command', async (req, res) => {
     const { user, cmd, title } = req.query;
     if (!user) return res.send('User error');
+
+    // ── !connect <code> 処理 ─────────────────────────
+    // チャットBotのURLを /api/command?user=$(user)&cmd=connect&code=$(querystring) に設定
+    if (cmd === 'connect') {
+        const code = (req.query.code || req.query.querystring || '').trim();
+        if (!code) return res.send(`@${user} Please provide a code. Example: !connect 123456`);
+        try {
+            const { rows: chRows } = await pool.query(
+                `SELECT name, icon FROM channels WHERE LOWER(name)=LOWER($1)`, [user]
+            );
+            const ch = chRows[0];
+            const channelName = ch ? ch.name : user;
+            const channelIcon = ch ? ch.icon : '';
+
+            const { rows } = await pool.query(
+                `SELECT token, created_at FROM connect_sessions
+                 WHERE code=$1 AND connected=FALSE
+                 ORDER BY created_at DESC LIMIT 1`,
+                [String(code)]
+            );
+            if (!rows.length) return res.send(`@${user} Code not found or already used. Please generate a new code.`);
+            if (Date.now() - Number(rows[0].created_at) > 120_000) {
+                await pool.query(`DELETE FROM connect_sessions WHERE token=$1`, [rows[0].token]);
+                return res.send(`@${user} Code expired. Please generate a new code.`);
+            }
+            await pool.query(
+                `UPDATE connect_sessions SET connected=TRUE, channel_name=$1, channel_icon=$2 WHERE token=$3`,
+                [channelName, channelIcon, rows[0].token]
+            );
+            return res.send(`@${user} ✅ Successfully connected! You are now logged in.`);
+        } catch(e) {
+            console.error('connect command error:', e.message);
+            return res.send(`@${user} Server error. Please try again.`);
+        }
+    }
+
     try {
         const { rows } = await pool.query('SELECT * FROM channels WHERE LOWER(name)=LOWER($1)', [user]);
         let ch = rows[0] || null;
@@ -294,10 +445,6 @@ app.get('/api/command', async (req, res) => {
                     await pool.query(
                         `UPDATE channels SET growth=growth+$1,view_growth=view_growth+$2 WHERE LOWER(name)=LOWER($3)`,
                         [g,vg,user]);
-                    // title: from ?title= param, or from querystring (NightBot $(querystring)), fallback 'No Title'
-                    // NightBot: !video lol → ?user=xxx&cmd=video&title=lol
-                    // $(querystring) を &title= に設定すること
-                    // 例: URL = /api/command?user=$(user)&cmd=video&title=$(querystring)
                     const qs = req.query;
                     const rawTitle = [
                         qs.title, qs.q, qs.message, qs.text, qs.arg, qs['1']
