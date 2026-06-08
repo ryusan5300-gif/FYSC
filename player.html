@@ -190,6 +190,34 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 /* LIVE dot */
 .live-dot{width:8px;height:8px;border-radius:50%;background:var(--live);display:inline-block;animation:pulse 1.5s ease infinite;}
 
+
+/* ── USER DROPDOWN ── */
+.user-chip-wrap{position:relative;}
+.user-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;min-width:200px;box-shadow:0 16px 40px rgba(0,0,0,0.6);z-index:400;opacity:0;pointer-events:none;transform:translateY(-6px);transition:opacity 0.2s,transform 0.2s;}
+.user-dropdown.open{opacity:1;pointer-events:all;transform:translateY(0);}
+.user-dropdown-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+.user-dropdown-avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface2);}
+.user-dropdown-name{font-size:0.85em;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.user-dropdown-item{display:flex;align-items:center;gap:10px;padding:11px 16px;font-size:0.83em;font-weight:600;color:var(--muted);cursor:pointer;transition:background 0.15s,color 0.15s;}
+.user-dropdown-item:hover{background:rgba(255,255,255,0.04);color:var(--text);}
+.user-dropdown-item.danger{color:#ff5555;}
+.user-dropdown-item.danger:hover{background:rgba(255,85,85,0.08);color:#ff5555;}
+
+/* ── COMMAND PANEL ── */
+.cmd-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin:0 24px 24px;display:none;}
+.cmd-panel-title{font-size:0.72em;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.cmd-panel-title-accent{color:var(--accent);}
+.cmd-grid{display:flex;flex-wrap:wrap;gap:10px;}
+.cmd-btn-wrap{display:flex;flex-direction:column;gap:6px;flex:1;min-width:120px;}
+.cmd-btn{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:0.85em;font-weight:700;padding:10px 14px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;position:relative;overflow:hidden;}
+.cmd-btn:hover:not(:disabled){border-color:rgba(255,45,85,0.5);background:rgba(255,45,85,0.08);}
+.cmd-btn:disabled{opacity:0.45;cursor:not-allowed;}
+.cmd-btn-cd{position:absolute;bottom:0;left:0;height:3px;background:var(--accent);transition:width 0.1s linear;border-radius:0 0 6px 6px;}
+.cmd-title-input{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:0.8em;padding:7px 10px;outline:none;transition:border-color 0.2s;}
+.cmd-title-input:focus{border-color:rgba(255,45,85,0.4);}
+.cmd-title-input::placeholder{color:var(--muted);}
+.cmd-result{margin-top:10px;font-size:0.8em;color:#00dd88;min-height:18px;}
+
 @media(max-width:600px){
   .topbar{padding:0 12px;gap:10px;}
   .genre-strip{padding:0 12px;}
@@ -246,6 +274,50 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
       <div class="video-card skel" style="height:220px;"></div>
       <div class="video-card skel" style="height:220px;"></div>
       <div class="video-card skel" style="height:220px;"></div>
+    </div>
+
+
+    <!-- Command Panel (shown when signed in) -->
+    <div class="cmd-panel" id="cmd-panel">
+      <div class="cmd-panel-title">Post Content <span class="cmd-panel-title-accent">as @<span id="cmd-panel-username"></span></span></div>
+      <div class="cmd-grid">
+        <div class="cmd-btn-wrap">
+          <input class="cmd-title-input" id="cmd-title-video" type="text" placeholder="Video title (optional)">
+          <button class="cmd-btn" id="btn-video" onclick="runCmd('video')">
+            📹 Video
+            <div class="cmd-btn-cd" id="cd-video" style="width:0%"></div>
+          </button>
+        </div>
+        <div class="cmd-btn-wrap">
+          <input class="cmd-title-input" id="cmd-title-short" type="text" placeholder="Short title (optional)">
+          <button class="cmd-btn" id="btn-short" onclick="runCmd('short')">
+            ⚡ Short
+            <div class="cmd-btn-cd" id="cd-short" style="width:0%"></div>
+          </button>
+        </div>
+        <div class="cmd-btn-wrap">
+          <div style="height:31px;"></div>
+          <button class="cmd-btn" id="btn-stream" onclick="runCmd('stream')">
+            🔴 Stream
+            <div class="cmd-btn-cd" id="cd-stream" style="width:0%"></div>
+          </button>
+        </div>
+        <div class="cmd-btn-wrap">
+          <div style="height:31px;"></div>
+          <button class="cmd-btn" id="btn-viral" onclick="runCmd('viral')">
+            🔥 Viral
+            <div class="cmd-btn-cd" id="cd-viral" style="width:0%"></div>
+          </button>
+        </div>
+        <div class="cmd-btn-wrap">
+          <div style="height:31px;"></div>
+          <button class="cmd-btn" id="btn-trend" onclick="runCmd('trend')">
+            📈 Trend
+            <div class="cmd-btn-cd" id="cd-trend" style="width:0%"></div>
+          </button>
+        </div>
+      </div>
+      <div class="cmd-result" id="cmd-result"></div>
     </div>
 
     <!-- Sub Count Lookup (keep original functionality) -->
@@ -827,11 +899,114 @@ function showLoginSuccess(user) {
 
 function setLoggedInUser(user) {
   loggedInUser = user;
+  // persist across reloads
+  try { localStorage.setItem('fysc_user', JSON.stringify(user)); } catch(e) {}
+  renderUserChip(user);
+  showCmdPanel(user);
+}
+
+function renderUserChip(user) {
   const area = document.getElementById('user-area');
-  area.innerHTML = `<div class="user-chip" onclick="openChannelFromRanking(loggedInUser)">
-    <img class="user-avatar" src="${user.icon||DEF}" onerror="this.src='${DEF}'">
-    <span class="user-name">${esc(user.name)}</span>
-  </div>`;
+  area.innerHTML = `
+    <div class="user-chip-wrap" id="user-chip-wrap">
+      <div class="user-chip" onclick="toggleUserDropdown(event)">
+        <img class="user-avatar" src="${user.icon||DEF}" onerror="this.src='${DEF}'">
+        <span class="user-name">${esc(user.name)}</span>
+      </div>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="user-dropdown-header">
+          <img class="user-dropdown-avatar" src="${user.icon||DEF}" onerror="this.src='${DEF}'">
+          <div class="user-dropdown-name">${esc(user.name)}</div>
+        </div>
+        <div class="user-dropdown-item" onclick="openChannelFromRanking(loggedInUser);closeUserDropdown();">
+          👤 My Channel
+        </div>
+        <div class="user-dropdown-item danger" onclick="signOut()">
+          Sign out
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleUserDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('user-dropdown');
+  if (dd) dd.classList.toggle('open');
+}
+function closeUserDropdown() {
+  const dd = document.getElementById('user-dropdown');
+  if (dd) dd.classList.remove('open');
+}
+document.addEventListener('click', () => closeUserDropdown());
+
+function signOut() {
+  try { localStorage.removeItem('fysc_user'); } catch(e) {}
+  loggedInUser = null;
+  document.getElementById('user-area').innerHTML = `<button class="login-btn" onclick="openLoginModal()">Sign in</button>`;
+  document.getElementById('cmd-panel').style.display = 'none';
+}
+
+function showCmdPanel(user) {
+  const panel = document.getElementById('cmd-panel');
+  panel.style.display = 'block';
+  document.getElementById('cmd-panel-username').textContent = user.name.replace(/^@/, '');
+}
+
+// ── Command execution ───────────────────────────────────────────────
+const CMD_COOLDOWNS = { video: 5, short: 5, stream: 45, viral: 60, trend: 90 };
+const cmdCdState = {};
+
+function runCmd(cmd) {
+  if (!loggedInUser) return;
+  const now = Date.now();
+  const cd = CMD_COOLDOWNS[cmd] * 1000;
+  if (cmdCdState[cmd] && now < cmdCdState[cmd].endsAt) return;
+
+  const titleInput = document.getElementById('cmd-title-' + cmd);
+  const title = titleInput ? titleInput.value.trim() : '';
+
+  const user = loggedInUser.name;
+  let url = `/api/command?user=${encodeURIComponent(user)}&cmd=${cmd}`;
+  if (title) url += `&title=${encodeURIComponent(title)}`;
+
+  fetch(url).then(r => r.text()).then(msg => {
+    const res = document.getElementById('cmd-result');
+    res.style.color = '#00dd88';
+    res.textContent = msg;
+    setTimeout(() => { res.textContent = ''; }, 4000);
+    if (titleInput) titleInput.value = '';
+  }).catch(() => {
+    const res = document.getElementById('cmd-result');
+    res.style.color = '#ff5555';
+    res.textContent = 'Error — could not send command.';
+    setTimeout(() => { res.textContent = ''; }, 4000);
+  });
+
+  // Start cooldown
+  cmdCdState[cmd] = { endsAt: now + cd };
+  startCdAnimation(cmd, cd);
+}
+
+function startCdAnimation(cmd, durationMs) {
+  const btn = document.getElementById('btn-' + cmd);
+  const bar = document.getElementById('cd-' + cmd);
+  if (!btn || !bar) return;
+  btn.disabled = true;
+  bar.style.width = '100%';
+
+  const start = Date.now();
+  const tick = setInterval(() => {
+    const elapsed = Date.now() - start;
+    const remaining = Math.max(0, durationMs - elapsed);
+    const pct = (remaining / durationMs) * 100;
+    bar.style.width = pct + '%';
+    if (remaining <= 0) {
+      clearInterval(tick);
+      btn.disabled = false;
+      bar.style.width = '0%';
+      delete cmdCdState[cmd];
+    }
+  }, 100);
 }
 
 function copyCommand() {
@@ -992,6 +1167,21 @@ document.addEventListener('click', e => {
 });
 
 // ── Init ───────────────────────────────────────────────────────────
+// Restore login from localStorage
+(function() {
+  try {
+    const saved = localStorage.getItem('fysc_user');
+    if (saved) {
+      const user = JSON.parse(saved);
+      if (user && user.name) {
+        loggedInUser = user;
+        renderUserChip(user);
+        showCmdPanel(user);
+      }
+    }
+  } catch(e) {}
+})();
+
 loadGenre('home');
 </script>
 </body>
