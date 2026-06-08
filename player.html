@@ -276,9 +276,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
       <div class="video-card skel" style="height:220px;"></div>
     </div>
 
+    <!-- Sub Count Lookup (keep original functionality) -->
+    <div class="player-section">
+      <div class="player-title">📊 CHECK YOUR SUB COUNT</div>
+      <div class="player-search-row" style="position:relative;">
+        <input class="player-input" id="player-input" type="text" placeholder="@YourChannelName" autocomplete="off">
+        <button class="player-btn" onclick="doPlayerSearch()">CHECK</button>
+        <div class="suggest-list" id="player-suggest" style="top:100%;left:0;right:54px;"></div>
+      </div>
+      <div id="player-result" style="margin-top:16px;display:none;"></div>
+    </div>
+  </div>
 
-    <!-- Command Panel (shown when signed in) -->
-    <div class="cmd-panel" id="cmd-panel">
+  <!-- CMD VIEW -->
+  <div id="cmd-view" style="display:none;padding:24px;">
+    <button class="back-btn" onclick="goHome()" style="margin:0 0 20px;">← Back</button>
+    <div class="cmd-panel" id="cmd-panel" style="display:block;margin:0;">
       <div class="cmd-panel-title">Post Content <span class="cmd-panel-title-accent">as @<span id="cmd-panel-username"></span></span></div>
       <div class="cmd-grid">
         <div class="cmd-btn-wrap">
@@ -318,17 +331,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
         </div>
       </div>
       <div class="cmd-result" id="cmd-result"></div>
-    </div>
-
-    <!-- Sub Count Lookup (keep original functionality) -->
-    <div class="player-section">
-      <div class="player-title">📊 CHECK YOUR SUB COUNT</div>
-      <div class="player-search-row" style="position:relative;">
-        <input class="player-input" id="player-input" type="text" placeholder="@YourChannelName" autocomplete="off">
-        <button class="player-btn" onclick="doPlayerSearch()">CHECK</button>
-        <div class="suggest-list" id="player-suggest" style="top:100%;left:0;right:54px;"></div>
-      </div>
-      <div id="player-result" style="margin-top:16px;display:none;"></div>
     </div>
   </div>
 
@@ -478,6 +480,17 @@ function setGenre(el, cmd) {
 function showHomeView() {
   document.getElementById('home-view').style.display = 'block';
   document.getElementById('channel-view').style.display = 'none';
+  document.getElementById('cmd-view').style.display = 'none';
+}
+
+function showCmdView() {
+  document.getElementById('home-view').style.display = 'none';
+  document.getElementById('channel-view').style.display = 'none';
+  document.getElementById('cmd-view').style.display = 'block';
+  if (loggedInUser) {
+    document.getElementById('cmd-panel-username').textContent = loggedInUser.name.replace(/^@/, '');
+    restoreCooldowns();
+  }
 }
 
 function goHome() {
@@ -902,7 +915,6 @@ function setLoggedInUser(user) {
   // persist across reloads
   try { localStorage.setItem('fysc_user', JSON.stringify(user)); } catch(e) {}
   renderUserChip(user);
-  showCmdPanel(user);
 }
 
 function renderUserChip(user) {
@@ -920,6 +932,9 @@ function renderUserChip(user) {
         </div>
         <div class="user-dropdown-item" onclick="openChannelFromRanking(loggedInUser);closeUserDropdown();">
           👤 My Channel
+        </div>
+        <div class="user-dropdown-item" onclick="showCmdView();closeUserDropdown();">
+          📹 Post Content
         </div>
         <div class="user-dropdown-item danger" onclick="signOut()">
           Sign out
@@ -943,13 +958,7 @@ function signOut() {
   try { localStorage.removeItem('fysc_user'); } catch(e) {}
   loggedInUser = null;
   document.getElementById('user-area').innerHTML = `<button class="login-btn" onclick="openLoginModal()">Sign in</button>`;
-  document.getElementById('cmd-panel').style.display = 'none';
-}
-
-function showCmdPanel(user) {
-  const panel = document.getElementById('cmd-panel');
-  panel.style.display = 'block';
-  document.getElementById('cmd-panel-username').textContent = user.name.replace(/^@/, '');
+  showHomeView();
 }
 
 // ── Command execution ───────────────────────────────────────────────
@@ -982,22 +991,28 @@ function runCmd(cmd) {
     setTimeout(() => { res.textContent = ''; }, 4000);
   });
 
-  // Start cooldown
-  cmdCdState[cmd] = { endsAt: now + cd };
-  startCdAnimation(cmd, cd);
+  // Start cooldown — persist to localStorage
+  const endsAt = now + cd;
+  cmdCdState[cmd] = { endsAt };
+  try {
+    const all = JSON.parse(localStorage.getItem('fysc_cd') || '{}');
+    all[cmd] = endsAt;
+    localStorage.setItem('fysc_cd', JSON.stringify(all));
+  } catch(e) {}
+  startCdAnimation(cmd, cd, now);
 }
 
-function startCdAnimation(cmd, durationMs) {
+function startCdAnimation(cmd, durationMs, startedAt) {
   const btn = document.getElementById('btn-' + cmd);
   const bar = document.getElementById('cd-' + cmd);
   if (!btn || !bar) return;
   btn.disabled = true;
   bar.style.width = '100%';
 
-  const start = Date.now();
+  const start = startedAt || Date.now();
+  const endsAt = start + durationMs;
   const tick = setInterval(() => {
-    const elapsed = Date.now() - start;
-    const remaining = Math.max(0, durationMs - elapsed);
+    const remaining = Math.max(0, endsAt - Date.now());
     const pct = (remaining / durationMs) * 100;
     bar.style.width = pct + '%';
     if (remaining <= 0) {
@@ -1005,8 +1020,30 @@ function startCdAnimation(cmd, durationMs) {
       btn.disabled = false;
       bar.style.width = '0%';
       delete cmdCdState[cmd];
+      try {
+        const all = JSON.parse(localStorage.getItem('fysc_cd') || '{}');
+        delete all[cmd];
+        localStorage.setItem('fysc_cd', JSON.stringify(all));
+      } catch(e) {}
     }
   }, 100);
+}
+
+function restoreCooldowns() {
+  try {
+    const all = JSON.parse(localStorage.getItem('fysc_cd') || '{}');
+    const now = Date.now();
+    Object.entries(all).forEach(([cmd, endsAt]) => {
+      const remaining = endsAt - now;
+      if (remaining > 0) {
+        cmdCdState[cmd] = { endsAt };
+        startCdAnimation(cmd, remaining, now);
+      } else {
+        delete all[cmd];
+      }
+    });
+    localStorage.setItem('fysc_cd', JSON.stringify(all));
+  } catch(e) {}
 }
 
 function copyCommand() {
@@ -1176,7 +1213,6 @@ document.addEventListener('click', e => {
       if (user && user.name) {
         loggedInUser = user;
         renderUserChip(user);
-        showCmdPanel(user);
       }
     }
   } catch(e) {}
