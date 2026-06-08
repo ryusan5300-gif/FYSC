@@ -207,7 +207,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <div class="logo-mark">FY<span>S</span>C</div>
+  <div class="logo-mark" onclick="goHome()" style="cursor:pointer;">FY<span>S</span>C</div>
   <div class="search-bar">
     <input type="text" id="main-search" placeholder="Search channels or videos..." autocomplete="off" spellcheck="false">
     <span class="search-icon">🔍</span>
@@ -215,7 +215,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
   </div>
   <div class="topbar-right">
     <div id="user-area">
-      <button class="login-btn" onclick="openLoginModal()">⚡ Connect</button>
+      <button class="login-btn" onclick="openLoginModal()">Sign in</button>
     </div>
   </div>
 </div>
@@ -223,11 +223,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 <!-- GENRE STRIP -->
 <div class="genre-strip" id="genre-strip">
   <div class="genre-tab active" data-cmd="home" onclick="setGenre(this,'home')">🏠 Home</div>
-  <div class="genre-tab" data-cmd="video" onclick="setGenre(this,'video')">📹 !video</div>
-  <div class="genre-tab" data-cmd="trend" onclick="setGenre(this,'trend')">🔥 !trend</div>
-  <div class="genre-tab" data-cmd="short" onclick="setGenre(this,'short')">⚡ !short</div>
-  <div class="genre-tab" data-cmd="live" onclick="setGenre(this,'live')">🔴 !live</div>
-  <div class="genre-tab" data-cmd="top" onclick="setGenre(this,'top')">🏆 !top</div>
+  <div class="genre-tab" data-cmd="video" onclick="setGenre(this,'video')">📹 Video</div>
+  <div class="genre-tab" data-cmd="trend" onclick="setGenre(this,'trend')">🔥 Trend</div>
+  <div class="genre-tab" data-cmd="short" onclick="setGenre(this,'short')">⚡ Short</div>
+  <div class="genre-tab" data-cmd="live" onclick="setGenre(this,'live')">🔴 Live</div>
+  <div class="genre-tab" data-cmd="top" onclick="setGenre(this,'top')">🏆 Top</div>
 </div>
 
 <!-- MAIN -->
@@ -476,7 +476,7 @@ function renderVideoGrid(videos) {
   grid.innerHTML = videos.map((v, i) => `
     <div class="video-card" onclick="openChannel('${esc(v.channelId||'')}','${esc(v.channelName||'')}')">
       <div class="thumb-wrap">
-        <img src="${v.thumbnail||DEF}" onerror="this.src='${DEF}'" alt="" loading="lazy">
+        <img src="${v.channelIcon||v.thumbnail||DEF}" onerror="this.src='${DEF}'" alt="" loading="lazy">
         ${v.isLive ? `<div class="thumb-live-badge"><span class="live-dot" style="width:6px;height:6px;margin-right:4px;"></span>LIVE</div>` : ''}
         ${v.duration && !v.isLive ? `<div class="thumb-duration">${esc(v.duration)}</div>` : ''}
       </div>
@@ -530,6 +530,8 @@ function renderTopChannels(ranking) {
 // ── Channel Page ───────────────────────────────────────────────────
 function openChannelFromRanking(u) {
   currentChannelData = u;
+  document.getElementById('home-view').style.display = 'none';
+  document.getElementById('channel-view').style.display = 'block';
   renderChannelPage({
     id: u.id || u.channelId || '',
     name: u.name,
@@ -540,6 +542,7 @@ function openChannelFromRanking(u) {
     rank: null,
     videos: []
   });
+  loadChannelVideos(u.id || u.channelId || '', u.name);
 }
 
 async function openChannel(channelId, channelName) {
@@ -590,8 +593,9 @@ async function loadChannelVideos(channelId, channelName) {
   try {
     const r = await fetch('/api/video-top50');
     const { videos } = await r.json();
+    const nameLower = (channelName || '').toLowerCase();
     const chVideos = (videos||[]).filter(v => v && (
-      v.channelName === channelName ||
+      (v.channelName || '').toLowerCase() === nameLower ||
       (channelId && v.channelId === channelId)
     ));
     renderChVideos(chVideos);
@@ -626,7 +630,7 @@ function renderChVideos(videos) {
   el.innerHTML = `<div class="video-grid">${videos.map((v, i) => `
     <div class="video-card">
       <div class="thumb-wrap">
-        <img src="${v.thumbnail||DEF}" onerror="this.src='${DEF}'" alt="" loading="lazy">
+        <img src="${v.channelIcon||v.thumbnail||DEF}" onerror="this.src='${DEF}'" alt="" loading="lazy">
         ${v.isLive ? `<div class="thumb-live-badge"><span class="live-dot" style="width:6px;height:6px;margin-right:4px;"></span>LIVE</div>` : ''}
         ${v.duration && !v.isLive ? `<div class="thumb-duration">${esc(v.duration)}</div>` : ''}
       </div>
