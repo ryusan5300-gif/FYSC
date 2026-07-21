@@ -374,6 +374,10 @@ const videoCommands = ['video','short','stream','viral','trend'];
 
 app.get('/api/command', async (req, res) => {
     const { user, cmd, title } = req.query;
+    const authPw = req.query.password || req.query.pw || req.query.secret;
+    if (authPw !== STREAMER_PASSWORD) {
+        return res.status(403).send('Forbidden: Invalid password');
+    }
     if (!user) return res.send('User error');
 
     // ── !connect <code> 処理 ─────────────────────────
