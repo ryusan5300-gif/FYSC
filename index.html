@@ -198,178 +198,245 @@
     requestAnimationFrame(()=>initialLoad());
     </script>
 
-    <!-- Milestone Celebration -->
+    <!-- Milestone Celebration (ユーザー提供コード完全対応) -->
     <script>
     (function() {
+    // ===== CONFIGURATION =====
     const MILESTONES = [
-        { min: 100000,  max: 105000,  text: "100,000" },
-        { min: 200000,  max: 205000,  text: "200,000" },
-        { min: 300000,  max: 305000,  text: "300,000" },
-        { min: 400000,  max: 405000,  text: "400,000" },
-        { min: 500000,  max: 505000,  text: "500,000" },
-        { min: 600000,  max: 605000,  text: "600,000" },
-        { min: 700000,  max: 705000,  text: "700,000" },
-        { min: 800000,  max: 805000,  text: "800,000" },
-        { min: 900000,  max: 905000,  text: "900,000" },
+        // Current milestones (100k-500k)
+        { min: 100000, max: 105000, text: "100,000" },
+        { min: 200000, max: 205000, text: "200,000" },
+        { min: 300000, max: 305000, text: "300,000" },
+        { min: 400000, max: 405000, text: "400,000" },
+        { min: 500000, max: 505000, text: "500,000" },
+
+        // New milestones up to 1.5 million
+        { min: 600000, max: 605000, text: "600,000" },
+        { min: 700000, max: 705000, text: "700,000" },
+        { min: 800000, max: 805000, text: "800,000" },
+        { min: 900000, max: 905000, text: "900,000" },
         { min: 1000000, max: 1005000, text: "1,000,000" },
         { min: 1100000, max: 1105000, text: "1,100,000" },
         { min: 1200000, max: 1205000, text: "1,200,000" },
         { min: 1300000, max: 1305000, text: "1,300,000" },
         { min: 1400000, max: 1405000, text: "1,400,000" },
         { min: 1500000, max: 1505000, text: "1,500,000" },
+
+        // Continue every 100k up to 100 million
         ...Array.from({length: 985}, (_, i) => {
-            const m = (i + 16) * 100000;
-            return { min: m, max: m + 5000, text: m.toLocaleString() };
+            const milestone = (i + 16) * 100000;
+            return {
+                min: milestone,
+                max: milestone + 5000,
+                text: milestone.toLocaleString()
+            };
         }),
+
+        // Special milestones after 100 million
         ...Array.from({length: 900}, (_, i) => {
-            const m = 100000000 + (i * 1000000);
-            return { min: m, max: m + 6000, text: m.toLocaleString() };
+            const milestone = 100000000 + (i * 1000000);
+            return {
+                min: milestone,
+                max: milestone + 6000,
+                text: milestone.toLocaleString()
+            };
         })
     ];
 
-    const ANIMATION_DURATION = 6400;
-    const FADE_DURATION      = 500;
+    const CARD_SELECTOR     = ".rank-item, .card";
+    const ODOMETER_SELECTOR = ".subs, .odometer";
+    const ANIMATION_DURATION = 6400; // 6.40 seconds
     const BACKGROUND_GIF     = "https://i.ibb.co/nsxWyHrm/IMG-7609.gif";
+    const FADE_DURATION      = 500; // 0.5s fade
 
-    // index.html 専用: rank-item が card、#odo-N が odometer
-    const CARD_SELECTOR     = ".rank-item";
-    const ODOMETER_SELECTOR = ".subs";   // odometer クラスが後付けされる .subs 要素
-
-    function parseValue(el) {
-        const n = parseInt(el.textContent.replace(/[^0-9]/g, ''), 10);
-        return isNaN(n) ? 0 : n;
+    function parseOdometerValue(text) {
+        const cleanText = text.toString().replace(/[^0-9]/g, '');
+        const num = parseInt(cleanText, 10);
+        return isNaN(num) ? 0 : num;
     }
-    function sanitize(t) { return t.replace(/[^a-zA-Z0-9-]/g, '-'); }
+
+    function sanitizeForDataset(text) {
+        return text.replace(/[^a-zA-Z0-9-]/g, '-');
+    }
+
+    function createCelebrationText(milestoneText) {
+        const textContainer = document.createElement("div");
+        textContainer.className = "celebration-text";
+        textContainer.textContent = milestoneText;
+        return textContainer;
+    }
 
     function celebrate(card, milestoneText, channelName) {
-        const key = 'celebrated-' + sanitize(milestoneText);
-        if (card.dataset[key] === 'true') return;
-        card.dataset[key] = 'true';
+        const sanitizedKey = sanitizeForDataset(milestoneText);
+        const celebrationId = `celebrated-${sanitizedKey}`;
 
-        const overlay = document.createElement('div');
-        overlay.className = 'cel-overlay';
-        overlay.style.opacity = '0';
+        if (card.dataset[celebrationId] === "true") return;
+        card.dataset[celebrationId] = "true";
 
-        const bgGif = document.createElement('img');
-        bgGif.className = 'cel-bg';
+        const overlay = document.createElement("div");
+        overlay.className = "celebration-overlay";
+        overlay.style.opacity = "0";
+
+        const contentContainer = document.createElement("div");
+        contentContainer.className = "celebration-content";
+
+        const bgGif = document.createElement("img");
+        bgGif.className = "celebration-bg";
         bgGif.src = BACKGROUND_GIF;
 
-        const content = document.createElement('div');
-        content.className = 'cel-content';
-
-        const nameEl = document.createElement('div');
-        nameEl.className = 'cel-name';
-        nameEl.textContent = channelName || '';
-
-        const numEl = document.createElement('div');
-        numEl.className = 'cel-text';
-        numEl.textContent = milestoneText;
+        const nameElement = document.createElement("div");
+        nameElement.className = "celebration-name";
+        const nameEl = card.querySelector(".name");
+        nameElement.textContent = channelName || (nameEl ? nameEl.textContent.trim() : "NAME");
 
         overlay.appendChild(bgGif);
-        content.appendChild(nameEl);
-        content.appendChild(numEl);
-        overlay.appendChild(content);
+        contentContainer.appendChild(nameElement);
+        contentContainer.appendChild(createCelebrationText(milestoneText));
+        overlay.appendChild(contentContainer);
 
-        card.style.position = 'relative';
+        card.style.position = "relative";
         card.appendChild(overlay);
 
-        // フェードイン
+        // Fade in animation
         setTimeout(() => {
             overlay.style.transition = `opacity ${FADE_DURATION}ms ease-in`;
-            overlay.style.opacity = '1';
+            overlay.style.opacity = "1";
         }, 10);
 
-        // フェードアウト
+        // Fade out animation
         setTimeout(() => {
             overlay.style.transition = `opacity ${FADE_DURATION}ms ease-out`;
-            overlay.style.opacity = '0';
+            overlay.style.opacity = "0";
             setTimeout(() => {
                 overlay.remove();
-                card.dataset[key] = 'false';
+                card.dataset[celebrationId] = "false";
             }, FADE_DURATION);
         }, ANIMATION_DURATION - FADE_DURATION);
     }
 
-    // applyIdx から直接呼ばれる: value は実際のsubs値
+    function checkCards() {
+        document.querySelectorAll(CARD_SELECTOR).forEach(card => {
+            const odometer = card.querySelector(ODOMETER_SELECTOR);
+            if (!odometer) return;
+
+            const value = parseOdometerValue(odometer.textContent);
+            for (let i = MILESTONES.length - 1; i >= 0; i--) {
+                const milestone = MILESTONES[i];
+                if (value >= milestone.min && value <= milestone.max) {
+                    celebrate(card, milestone.text);
+                    break;
+                }
+            }
+        });
+    }
+
+    // applyIdx や外部更新からのダイレクト呼出
     window.checkMilestone = function(idx, value, channelName) {
         const card = document.getElementById('item-' + idx);
         if (!card || card.classList.contains('empty')) return;
         for (let i = MILESTONES.length - 1; i >= 0; i--) {
             const m = MILESTONES[i];
             if (value >= m.min && value <= m.max) {
-                celebrate(card, m.text, channelName || '');
+                celebrate(card, m.text, channelName);
                 break;
             }
         }
     };
 
-    // スタイル
-    const style = document.createElement('style');
+    // STYLES
+    const style = document.createElement("style");
     style.textContent = `
-    .cel-overlay {
-        position: absolute; top: 0; left: 0;
-        width: 100%; height: 100%;
-        display: flex; align-items: center; justify-content: center;
-        z-index: 100; overflow: hidden;
+    .celebration-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        overflow: hidden;
         pointer-events: none;
+        transition: opacity ${FADE_DURATION}ms ease;
     }
-    .cel-bg {
-        position: absolute; top: 0; left: 0;
-        width: 100%; height: 100%;
-        object-fit: cover; opacity: 0.75;
+
+    .celebration-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        z-index: 110;
+        transform: translateY(-10%);
     }
-    .cel-content {
-        position: relative; z-index: 110;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
-        transform: translateY(-15%);
+
+    .celebration-bg {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.85;
+        top: 0;
+        left: 0;
     }
-    .cel-name {
-        font-size: 13px; font-weight: 900; color: #fff;
+
+    .celebration-name {
+        font-size: 15px;
+        font-weight: 900;
+        color: white;
         text-shadow: 0 0 6px rgba(0,0,0,0.8);
-        opacity: 0.85; margin-bottom: 4px; text-align: center;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        max-width: 180px;
+        margin-bottom: 4px;
+        opacity: 0.9;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
     }
-    .cel-text {
-        font-size: 20px; font-weight: 900; color: #fff;
-        text-shadow: 0 0 10px rgba(0,0,0,0.7);
+
+    .celebration-text {
+        font-size: 22px;
+        font-weight: 900;
+        color: white;
+        text-shadow: 0 0 10px rgba(0,0,0,0.8);
         animation: celColorChange 2s infinite;
         text-align: center;
     }
+
     @keyframes celColorChange {
-        0%   { color: #ffc4d8; }
-        20%  { color: #d4c0fa; }
-        40%  { color: #bcdbf5; }
-        60%  { color: #f7f7be; }
-        80%  { color: #bcf5bc; }
+        0% { color: #ffc4d8; }
+        20% { color: #d4c0fa; }
+        40% { color: #bcdbf5; }
+        60% { color: #f7f7be; }
+        80% { color: #bcf5bc; }
         100% { color: #f5bccf; }
     }
     `;
     document.head.appendChild(style);
 
-    // マイルストーンは applyIdx から直接 window.checkMilestone() で呼ぶ
-    })();
-    </script>
+    // MutationObserver 初期化
+    const observer = new MutationObserver(checkCards);
+    observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true
+    });
 
+    checkCards();
 
-    <script>
-    // ── コンソールテスト用 ──
-    // 使い方: testMilestone(カード番号, 登録者数)
-    // 例: testMilestone(0, 100000)  → 1番目のカードを100,000でお祝い
+    // テスト機能
     window.testMilestone = function(idx, value) {
         const card = document.getElementById('item-' + idx);
-        if (!card) { console.error('カード ' + idx + ' が見つかりません'); return; }
-        // お祝いフラグをリセット
+        if (!card) return console.error('カード ' + idx + ' が見つかりません');
         Object.keys(card.dataset).forEach(k => { if (k.startsWith('celebrated-')) card.dataset[k] = 'false'; });
         const nameEl = card.querySelector('.name');
-        const name = nameEl ? nameEl.textContent.trim() : '';
+        const name = nameEl ? nameEl.textContent.trim() : 'NAME';
         if (typeof window.checkMilestone === 'function') {
             window.checkMilestone(idx, value, name);
         }
-        console.log('テスト: カード' + idx + ' → ' + value.toLocaleString() + ' subs (' + name + ')');
     };
+    })();
     </script>
-
 </body>
 </html>
