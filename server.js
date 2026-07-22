@@ -74,9 +74,10 @@ async function initDB() {
             view_growth INTEGER NOT NULL DEFAULT 0
         )
     `);
-    // id カラムを安全に追加
+    // id, handle カラムを安全に追加
     try {
         await pool.query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS id TEXT;`);
+        await pool.query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS handle TEXT DEFAULT '';`);
     } catch(e) {}
 
     await pool.query(`
@@ -126,10 +127,11 @@ async function migrateChannels() {
             const channelId = (yt && yt.channelId) ? yt.channelId : row.name;
             const updatedName = (yt && yt.name) ? yt.name : row.name;
             const updatedIcon = (yt && yt.icon) ? yt.icon : row.icon;
+            const handleStr = row.name.startsWith('@') ? row.name : '@' + row.name;
 
             await pool.query(
-                `UPDATE channels SET id = $1, name = $2, icon = COALESCE(NULLIF($3, ''), icon) WHERE name = $4`,
-                [channelId, updatedName, updatedIcon, row.name]
+                `UPDATE channels SET id = $1, name = $2, handle = $3, icon = COALESCE(NULLIF($4, ''), icon) WHERE name = $5`,
+                [channelId, updatedName, handleStr, updatedIcon, row.name]
             );
             console.log(`Migrated: ${row.name} -> ID: ${channelId}`);
         }
@@ -149,12 +151,33 @@ async function getAllChannels() {
 async function findChannel(queryStr) {
     if (!queryStr) return null;
     const q = queryStr.trim();
+    const rawQ = q.replace(/^@/, '');
     const { rows } = await pool.query(
-        `SELECT id, name, subs, icon, growth, views, view_growth FROM channels
-         WHERE LOWER(id) = LOWER($1) OR LOWER(name) = LOWER($1) LIMIT 1`,
-        [q]
+        `SELECT id, name, handle, subs, icon, growth, views, view_growth FROM channels
+         WHERE LOWER(id) = LOWER($1)
+            OR LOWER(name) = LOWER($1)
+            OR LOWER(REPLACE(name, '@', '')) = LOWER($2)
+            OR LOWER(handle) = LOWER($1)
+            OR LOWER(REPLACE(handle, '@', '')) = LOWER($2)
+         LIMIT 1`,
+        [q, rawQ]
     );
-    return rows[0] || null;
+    if (rows[0]) return rows[0];
+
+    // DBで直接見つからない場合は YouTube API で検索して ID で引く
+    try {
+        const yt = await searchYouTubeChannel(queryStr);
+        if (yt && yt.channelId) {
+            const { rows: ytRows } = await pool.query(
+                `SELECT id, name, handle, subs, icon, growth, views, view_growth FROM channels
+                 WHERE id = $1 OR LOWER(name) = LOWER($2) LIMIT 1`,
+                [yt.channelId, yt.name]
+            );
+            if (ytRows[0]) return ytRows[0];
+        }
+    } catch (e) {}
+
+    return null;
 }
 
 async function getAllVideos() {
@@ -507,24 +530,23 @@ app.get('/api/command', async (req, res) => {
                 const channelId   = (yt && yt.channelId) ? yt.channelId : user;
                 const channelName = (yt && yt.name)      ? yt.name      : user;
                 const channelIcon = (yt && yt.icon)      ? yt.icon      : '';
+                const userHandle  = user.startsWith('@') ? user : '@' + user;
 
-                if (!ch) ch = await findChannel(channelId);
+                if (!ch) ch = await findChannel(channelId) || await findChannel(user);
 
                 if (!ch) {
                     await pool.query(
-                        `INSERT INTO channels (id, name, subs, icon, growth, views, view_growth)
-                         VALUES ($1, $2, 0, $3, 0, 0, 0)`,
-                        [channelId, channelName, channelIcon]
+                        `INSERT INTO channels (id, name, handle, subs, icon, growth, views, view_growth)
+                         VALUES ($1, $2, $3, 0, $4, 0, 0, 0)`,
+                        [channelId, channelName, userHandle, channelIcon]
                     );
                     message = `@${user} Added to rankings and system.`;
                 } else {
-                    if (yt) {
-                        await pool.query(
-                            `UPDATE channels SET name=$1, icon=COALESCE(NULLIF($2, ''), icon)
-                             WHERE id=$3 OR LOWER(name)=LOWER($4)`,
-                            [channelName, channelIcon, ch.id || channelId, user]
-                        );
-                    }
+                    await pool.query(
+                        `UPDATE channels SET name=$1, handle=$2, icon=COALESCE(NULLIF($3, ''), icon)
+                         WHERE id=$4 OR LOWER(name)=LOWER($5) OR LOWER(handle)=LOWER($5)`,
+                        [channelName, userHandle, channelIcon, ch.id || channelId, user]
+                    );
                     message = `@${user} is already in the ranking!`;
                 }
                 break;
