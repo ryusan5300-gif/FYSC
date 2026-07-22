@@ -439,6 +439,20 @@ app.get('/api/import-data', async (req, res) => {
     } catch(e) { res.status(500).send('Import error: ' + e.message); }
 });
 
+// データリセットAPI (パスワード保護)
+app.get('/api/reset-data', async (req, res) => {
+    const pw = req.query.password || req.query.pw || req.query.secret;
+    if (pw !== STREAMER_PASSWORD) return res.status(403).send('Forbidden: Invalid password');
+    try {
+        await pool.query('TRUNCATE TABLE channels, videos, connect_sessions;');
+        rankingVersion++;
+        res.send('✅ Database successfully reset! All channel, video, and session data cleared.');
+    } catch(e) {
+        console.error('Reset error:', e.message);
+        res.status(500).send('Reset error: ' + e.message);
+    }
+});
+
 // ── API: command ─────────────────────────────────────
 const RESTRICTED    = ['video','short','stream','viral','trend','growth','subcount','viewcount'];
 const videoCommands = ['video','short','stream','viral','trend'];
