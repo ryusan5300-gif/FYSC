@@ -16,8 +16,54 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
-// ── テーブル初期化 ───────────────────────────────────
+// ── ユーティリティ & YouTube 検索 ────────────────────
+const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+const fetchFn = typeof fetch !== 'undefined'
+    ? fetch
+    : (...a) => import('node-fetch').then(m => m.default(...a));
+
+// YouTube 検索・情報取得ヘルパー (チャンネルID、名前、アイコンを返却)
+async function searchYouTubeChannel(query) {
+    if (!query) return null;
+    const q = query.trim();
+    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') return null;
+    try {
+        // UCから始まる24文字の場合は直接 channels API を試行
+        if (q.startsWith('UC') && q.length === 24) {
+            const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${encodeURIComponent(q)}&key=${YOUTUBE_API_KEY}`;
+            const r = await fetchFn(url);
+            const d = await r.json();
+            if (d.items && d.items.length) {
+                const item = d.items[0];
+                const sn = item.snippet || {};
+                const th = sn.thumbnails || {};
+                return {
+                    channelId: item.id,
+                    name: sn.title || query,
+                    icon: (th.high || th.medium || th.default || {}).url || ''
+                };
+            }
+        }
+        // それ以外（ハンドル名やキーワード）は search API
+        const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(q)}&maxResults=1&key=${YOUTUBE_API_KEY}`;
+        const r   = await fetchFn(url);
+        const d   = await r.json();
+        if (!d.items || !d.items.length) return null;
+        const item = d.items[0];
+        const sn   = item.snippet;
+        const th   = sn.thumbnails || {};
+        return {
+            channelId: item.id.channelId || sn.channelId || q,
+            name:      sn.title || query,
+            icon:      (th.high || th.medium || th.default || {}).url || ''
+        };
+    } catch (e) { console.error('YT search error:', e.message); return null; }
+}
+
+// ── テーブル初期化 & データマイグレーション ─────────────
 async function initDB() {
+    // channels テーブル作成 (id を主キー候補として追加)
     await pool.query(`
         CREATE TABLE IF NOT EXISTS channels (
             name        TEXT PRIMARY KEY,
@@ -28,53 +74,97 @@ async function initDB() {
             view_growth INTEGER NOT NULL DEFAULT 0
         )
     `);
+    // id カラムを安全に追加
+    try {
+        await pool.query(`ALTER TABLE channels ADD COLUMN IF NOT EXISTS id TEXT;`);
+    } catch(e) {}
+
     await pool.query(`
         CREATE TABLE IF NOT EXISTS videos (
             id           TEXT PRIMARY KEY,
             title        TEXT    NOT NULL DEFAULT 'No Title',
+            channel_id   TEXT    NOT NULL DEFAULT '',
             channel_name TEXT    NOT NULL DEFAULT '',
             channel_icon TEXT    NOT NULL DEFAULT '',
             views        INTEGER NOT NULL DEFAULT 0,
             view_growth  INTEGER NOT NULL DEFAULT 0
         )
     `);
-    // !connect セッションテーブル
+    try {
+        await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS channel_id TEXT DEFAULT '';`);
+    } catch(e) {}
+
     await pool.query(`
         CREATE TABLE IF NOT EXISTS connect_sessions (
-            token      TEXT PRIMARY KEY,
-            code       TEXT NOT NULL,
+            token        TEXT PRIMARY KEY,
+            code         TEXT NOT NULL,
+            channel_id   TEXT,
             channel_name TEXT,
             channel_icon TEXT,
-            connected  BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at BIGINT  NOT NULL
+            connected    BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at   BIGINT  NOT NULL
         )
     `);
+    try {
+        await pool.query(`ALTER TABLE connect_sessions ADD COLUMN IF NOT EXISTS channel_id TEXT;`);
+    } catch(e) {}
+
+    // 既存チャンネルの id マイグレーション
+    await migrateChannels();
+
     console.log('DB tables ready.');
+}
+
+// 既存チャンネルデータの ID 補填マイグレーション
+async function migrateChannels() {
+    try {
+        const { rows } = await pool.query(`SELECT name, icon FROM channels WHERE id IS NULL OR id = ''`);
+        if (!rows.length) return;
+        console.log(`Migrating ${rows.length} channels to use YouTube Channel IDs...`);
+        for (const row of rows) {
+            const yt = await searchYouTubeChannel(row.name);
+            const channelId = (yt && yt.channelId) ? yt.channelId : row.name;
+            const updatedName = (yt && yt.name) ? yt.name : row.name;
+            const updatedIcon = (yt && yt.icon) ? yt.icon : row.icon;
+
+            await pool.query(
+                `UPDATE channels SET id = $1, name = $2, icon = COALESCE(NULLIF($3, ''), icon) WHERE name = $4`,
+                [channelId, updatedName, updatedIcon, row.name]
+            );
+            console.log(`Migrated: ${row.name} -> ID: ${channelId}`);
+        }
+    } catch (e) {
+        console.error('Migration error:', e.message);
+    }
 }
 
 // ── データ読み書きヘルパー ────────────────────────────
 async function getAllChannels() {
     const { rows } = await pool.query(
-        'SELECT name, subs, icon, growth, views, view_growth AS "viewGrowth" FROM channels'
+        'SELECT COALESCE(NULLIF(id, \'\'), name) AS id, name, subs, icon, growth, views, view_growth AS "viewGrowth" FROM channels'
     );
     return rows;
 }
 
+async function findChannel(queryStr) {
+    if (!queryStr) return null;
+    const q = queryStr.trim();
+    const { rows } = await pool.query(
+        `SELECT id, name, subs, icon, growth, views, view_growth FROM channels
+         WHERE LOWER(id) = LOWER($1) OR LOWER(name) = LOWER($1) LIMIT 1`,
+        [q]
+    );
+    return rows[0] || null;
+}
+
 async function getAllVideos() {
     const { rows } = await pool.query(
-        `SELECT id, title, channel_name AS "channelName", channel_icon AS "channelIcon",
+        `SELECT id, title, channel_id AS "channelId", channel_name AS "channelName", channel_icon AS "channelIcon",
                 views, view_growth AS "viewGrowth"
          FROM videos WHERE title IS NOT NULL AND title <> ''`
     );
     return rows;
 }
-
-// ── ユーティリティ ───────────────────────────────────
-const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-
-const fetchFn = typeof fetch !== 'undefined'
-    ? fetch
-    : (...a) => import('node-fetch').then(m => m.default(...a));
 
 function buildSortedChannels(channels) {
     return [...channels].sort((a, b) => b.subs - a.subs).slice(0, 50);
@@ -349,25 +439,6 @@ app.get('/api/import-data', async (req, res) => {
     } catch(e) { res.status(500).send('Import error: ' + e.message); }
 });
 
-// YouTube 検索ヘルパー
-async function searchYouTubeChannel(query) {
-    if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY_HERE') return null;
-    try {
-        const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(query)}&maxResults=1&key=${YOUTUBE_API_KEY}`;
-        const r   = await fetchFn(url);
-        const d   = await r.json();
-        if (!d.items || !d.items.length) return null;
-        const item = d.items[0];
-        const sn   = item.snippet;
-        const th   = sn.thumbnails || {};
-        return {
-            channelId: sn.channelId || item.id.channelId,
-            name:      sn.title || query,
-            icon:      (th.high || th.medium || th.default || {}).url || ''
-        };
-    } catch (e) { console.error('YT search error:', e.message); return null; }
-}
-
 // ── API: command ─────────────────────────────────────
 const RESTRICTED    = ['video','short','stream','viral','trend','growth','subcount','viewcount'];
 const videoCommands = ['video','short','stream','viral','trend'];
@@ -381,17 +452,14 @@ app.get('/api/command', async (req, res) => {
     if (!user) return res.send('User error');
 
     // ── !connect <code> 処理 ─────────────────────────
-    // チャットBotのURLを /api/command?user=$(user)&cmd=connect&code=$(querystring) に設定
     if (cmd === 'connect') {
         const code = (req.query.code || req.query.querystring || '').trim();
         if (!code) return res.send(`@${user} Please provide a code. Example: !connect 123456`);
         try {
-            const { rows: chRows } = await pool.query(
-                `SELECT name, icon FROM channels WHERE LOWER(name)=LOWER($1)`, [user]
-            );
-            const ch = chRows[0];
+            const ch = await findChannel(user);
             const channelName = ch ? ch.name : user;
             const channelIcon = ch ? ch.icon : '';
+            const channelId   = ch ? ch.id   : '';
 
             const { rows } = await pool.query(
                 `SELECT token, created_at FROM connect_sessions
@@ -405,8 +473,8 @@ app.get('/api/command', async (req, res) => {
                 return res.send(`@${user} Code expired. Please generate a new code.`);
             }
             await pool.query(
-                `UPDATE connect_sessions SET connected=TRUE, channel_name=$1, channel_icon=$2 WHERE token=$3`,
-                [channelName, channelIcon, rows[0].token]
+                `UPDATE connect_sessions SET connected=TRUE, channel_id=$1, channel_name=$2, channel_icon=$3 WHERE token=$4`,
+                [channelId, channelName, channelIcon, rows[0].token]
             );
             return res.send(`@${user} ✅ Successfully connected! You are now logged in.`);
         } catch(e) {
@@ -416,21 +484,40 @@ app.get('/api/command', async (req, res) => {
     }
 
     try {
-        const { rows } = await pool.query('SELECT * FROM channels WHERE LOWER(name)=LOWER($1)', [user]);
-        let ch = rows[0] || null;
+        let ch = await findChannel(user);
         if (!ch && RESTRICTED.includes(cmd)) return res.send(`@${user} You are not registered. Use !add first.`);
         let message = '';
         switch (cmd) {
             case 'add': {
                 const yt = await searchYouTubeChannel(user);
+                const channelId   = (yt && yt.channelId) ? yt.channelId : user;
+                const channelName = (yt && yt.name)      ? yt.name      : user;
+                const channelIcon = (yt && yt.icon)      ? yt.icon      : '';
+
+                if (!ch) ch = await findChannel(channelId);
+
                 if (!ch) {
-                    await pool.query(`INSERT INTO channels (name,subs,icon,growth,views,view_growth) VALUES ($1,0,$2,0,0,0)`,
-                        [user, yt ? yt.icon : '']);
+                    await pool.query(
+                        `INSERT INTO channels (id, name, subs, icon, growth, views, view_growth)
+                         VALUES ($1, $2, 0, $3, 0, 0, 0)`,
+                        [channelId, channelName, channelIcon]
+                    );
                     message = `@${user} Added to rankings and system.`;
                 } else {
-                    if (yt) await pool.query('UPDATE channels SET icon=$1 WHERE LOWER(name)=LOWER($2)', [yt.icon, user]);
+                    if (yt) {
+                        await pool.query(
+                            `UPDATE channels SET name=$1, icon=COALESCE(NULLIF($2, ''), icon)
+                             WHERE id=$3 OR LOWER(name)=LOWER($4)`,
+                            [channelName, channelIcon, ch.id || channelId, user]
+                        );
+                    }
                     message = `@${user} is already in the ranking!`;
                 }
+                break;
+            }
+            case 'refresh': {
+                rankingVersion++;
+                message = `@${user} 🔄 Refreshed! Reloading index.html...`;
                 break;
             }
             case 'growth':    message = `@${user} Growth: ${(ch.growth||0).toLocaleString()}`; break;
@@ -446,20 +533,23 @@ app.get('/api/command', async (req, res) => {
                         case 'viral':  g=rand(10,500);  vg=rand(g*3,g*6); break;
                         case 'trend':  g=rand(10,1000); vg=rand(g*3,g*7); break;
                     }
+                    const targetId = ch.id || ch.name;
                     await pool.query(
-                        `UPDATE channels SET growth=growth+$1,view_growth=view_growth+$2 WHERE LOWER(name)=LOWER($3)`,
-                        [g,vg,user]);
+                        `UPDATE channels SET growth=growth+$1, view_growth=view_growth+$2 WHERE id=$3 OR LOWER(name)=LOWER($4)`,
+                        [g, vg, targetId, user]
+                    );
                     const qs = req.query;
                     const rawTitle = [
                         qs.title, qs.q, qs.message, qs.text, qs.arg, qs['1']
                     ].map(v => (v || '').trim()).filter(v => v !== '' && v !== 'undefined').find(Boolean) || '';
                     const videoTitle = rawTitle !== '' ? rawTitle : 'No Title';
                     const videoId    = Date.now().toString(36)+Math.random().toString(36).substr(2,5);
-                    const { rows: chRows } = await pool.query('SELECT icon FROM channels WHERE LOWER(name)=LOWER($1)',[user]);
-                    const icon = chRows[0] ? chRows[0].icon : '';
+                    const icon = ch ? ch.icon : '';
                     await pool.query(
-                        `INSERT INTO videos (id,title,channel_name,channel_icon,views,view_growth) VALUES ($1,$2,$3,$4,0,$5)`,
-                        [videoId,videoTitle,user,icon,vg]);
+                        `INSERT INTO videos (id, title, channel_id, channel_name, channel_icon, views, view_growth)
+                         VALUES ($1, $2, $3, $4, $5, 0, $6)`,
+                        [videoId, videoTitle, targetId, ch.name || user, icon, vg]
+                    );
                     message = `@${user} Posted a Video "${videoTitle}"`;
                 } else {
                     return res.send(`Unknown command: !${cmd}`);
