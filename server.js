@@ -2,6 +2,7 @@ const express  = require('express');
 const { Pool } = require('pg');
 const path     = require('path');
 const crypto   = require('crypto');
+const fs       = require('fs');
 const app      = express();
 const PORT     = process.env.PORT || 3000;
 
@@ -151,27 +152,30 @@ async function getAllChannels() {
 async function findChannel(queryStr) {
     if (!queryStr) return null;
     const q = queryStr.trim();
-    const rawQ = q.replace(/^@/, '');
+    const rawQ = q.replace(/^@+/, '');
+    const handleQ = '@' + rawQ;
     const { rows } = await pool.query(
         `SELECT id, name, handle, subs, icon, growth, views, view_growth FROM channels
          WHERE LOWER(id) = LOWER($1)
             OR LOWER(name) = LOWER($1)
-            OR LOWER(REPLACE(name, '@', '')) = LOWER($2)
+            OR LOWER(name) = LOWER($2)
+            OR LOWER(REPLACE(name, '@', '')) = LOWER($1)
             OR LOWER(handle) = LOWER($1)
-            OR LOWER(REPLACE(handle, '@', '')) = LOWER($2)
+            OR LOWER(handle) = LOWER($2)
+            OR LOWER(REPLACE(handle, '@', '')) = LOWER($1)
          LIMIT 1`,
-        [q, rawQ]
+        [rawQ, handleQ]
     );
     if (rows[0]) return rows[0];
 
     // DBで直接見つからない場合は YouTube API で検索して ID で引く
     try {
-        const yt = await searchYouTubeChannel(queryStr);
+        const yt = await searchYouTubeChannel(rawQ);
         if (yt && yt.channelId) {
             const { rows: ytRows } = await pool.query(
                 `SELECT id, name, handle, subs, icon, growth, views, view_growth FROM channels
-                 WHERE id = $1 OR LOWER(name) = LOWER($2) LIMIT 1`,
-                [yt.channelId, yt.name]
+                 WHERE id = $1 OR LOWER(name) = LOWER($2) OR LOWER(handle) = LOWER($3) LIMIT 1`,
+                [yt.channelId, yt.name, handleQ]
             );
             if (ytRows[0]) return ytRows[0];
         }
@@ -324,9 +328,13 @@ app.post('/api/auth/connect-verify', async (req, res) => {
 // ════════════════════════════════════════════════════════════════
 //  配信者専用ルート
 // ════════════════════════════════════════════════════════════════
+const fastestGrowthFile = fs.existsSync(path.join(__dirname, 'Fastest_growth.html'))
+    ? 'Fastest_growth.html'
+    : 'Fastest growth.html';
+
 app.get('/streamer/ranking',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/streamer/battle',           streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Battle.html')));
-app.get('/streamer/fastest',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Fastest_growth.html')));
+app.get('/streamer/fastest',          streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, fastestGrowthFile)));
 app.get('/streamer/totalsubscribers', streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'Totalsubscribers.html')));
 app.get('/streamer/totalviews',       streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'TotalView.html')));
 app.get('/streamer/videotop',         streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, 'VideoViewTOP50.html')));
@@ -334,11 +342,17 @@ app.get('/streamer/stats',            streamerOnly, (_req, res) => res.sendFile(
 
 // 直打ちアクセスも保護
 const PROTECTED_FILES = [
-    'index.html','Battle.html','Fastest_growth.html',
+    'index.html','Battle.html','Fastest_growth.html','Fastest growth.html',
     'Totalsubscribers.html','TotalView.html','VideoViewTOP50.html','stats.html'
 ];
 PROTECTED_FILES.forEach(f => {
-    app.get('/' + f, streamerOnly, (_req, res) => res.sendFile(path.join(__dirname, f)));
+    app.get('/' + f, streamerOnly, (_req, res) => {
+        const filePath = path.join(__dirname, f);
+        if (fs.existsSync(filePath)) {
+            return res.sendFile(filePath);
+        }
+        res.sendFile(path.join(__dirname, fastestGrowthFile));
+    });
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -482,19 +496,27 @@ const videoCommands = ['video','short','stream','viral','trend'];
 
 app.get('/api/command', async (req, res) => {
     const { user, cmd, title } = req.query;
-    const authPw = req.query.password || req.query.pw || req.query.secret;
+    const cookie = req.headers.cookie || '';
+    const cookieMatch = cookie.match(/fysc_auth=([^;]+)/);
+    const cookiePw = cookieMatch ? cookieMatch[1] : '';
+    const authPw = req.query.password || req.query.pw || req.query.secret || cookiePw;
     if (authPw !== STREAMER_PASSWORD) {
         return res.status(403).send('Forbidden: Invalid password');
     }
     if (!user) return res.send('User error');
 
+    const cleanUser = String(user).trim().replace(/^@+/, '');
+    if (!cleanUser) return res.send('User error');
+    const mention = '@' + cleanUser;
+    const command = String(cmd || '').trim().toLowerCase();
+
     // ── !connect <code> 処理 ─────────────────────────
-    if (cmd === 'connect') {
+    if (command === 'connect') {
         const code = (req.query.code || req.query.querystring || '').trim();
-        if (!code) return res.send(`@${user} Please provide a code. Example: !connect 123456`);
+        if (!code) return res.send(`${mention} Please provide a code. Example: !connect 123456`);
         try {
-            const ch = await findChannel(user);
-            const channelName = ch ? ch.name : user;
+            const ch = await findChannel(cleanUser);
+            const channelName = ch ? ch.name : mention;
             const channelIcon = ch ? ch.icon : '';
             const channelId   = ch ? ch.id   : '';
 
@@ -504,35 +526,35 @@ app.get('/api/command', async (req, res) => {
                  ORDER BY created_at DESC LIMIT 1`,
                 [String(code)]
             );
-            if (!rows.length) return res.send(`@${user} Code not found or already used. Please generate a new code.`);
+            if (!rows.length) return res.send(`${mention} Code not found or already used. Please generate a new code.`);
             if (Date.now() - Number(rows[0].created_at) > 120_000) {
                 await pool.query(`DELETE FROM connect_sessions WHERE token=$1`, [rows[0].token]);
-                return res.send(`@${user} Code expired. Please generate a new code.`);
+                return res.send(`${mention} Code expired. Please generate a new code.`);
             }
             await pool.query(
                 `UPDATE connect_sessions SET connected=TRUE, channel_id=$1, channel_name=$2, channel_icon=$3 WHERE token=$4`,
                 [channelId, channelName, channelIcon, rows[0].token]
             );
-            return res.send(`@${user} ✅ Successfully connected! You are now logged in.`);
+            return res.send(`${mention} ✅ Successfully connected! You are now logged in.`);
         } catch(e) {
             console.error('connect command error:', e.message);
-            return res.send(`@${user} Server error. Please try again.`);
+            return res.send(`${mention} Server error. Please try again.`);
         }
     }
 
     try {
-        let ch = await findChannel(user);
-        if (!ch && RESTRICTED.includes(cmd)) return res.send(`@${user} You are not registered. Use !add first.`);
+        let ch = await findChannel(cleanUser);
+        if (!ch && RESTRICTED.includes(command)) return res.send(`${mention} You are not registered. Use !add first.`);
         let message = '';
-        switch (cmd) {
+        switch (command) {
             case 'add': {
-                const yt = await searchYouTubeChannel(user);
-                const channelId   = (yt && yt.channelId) ? yt.channelId : user;
-                const channelName = (yt && yt.name)      ? yt.name      : user;
+                const yt = await searchYouTubeChannel(cleanUser);
+                const channelId   = (yt && yt.channelId) ? yt.channelId : cleanUser;
+                const channelName = (yt && yt.name)      ? yt.name      : mention;
                 const channelIcon = (yt && yt.icon)      ? yt.icon      : '';
-                const userHandle  = user.startsWith('@') ? user : '@' + user;
+                const userHandle  = mention;
 
-                if (!ch) ch = await findChannel(channelId) || await findChannel(user);
+                if (!ch) ch = await findChannel(channelId) || await findChannel(cleanUser);
 
                 if (!ch) {
                     await pool.query(
@@ -540,29 +562,29 @@ app.get('/api/command', async (req, res) => {
                          VALUES ($1, $2, $3, 0, $4, 0, 0, 0)`,
                         [channelId, channelName, userHandle, channelIcon]
                     );
-                    message = `@${user} Added to rankings and system.`;
+                    message = `${mention} Added to rankings and system.`;
                 } else {
                     await pool.query(
                         `UPDATE channels SET name=$1, handle=$2, icon=COALESCE(NULLIF($3, ''), icon)
-                         WHERE id=$4 OR LOWER(name)=LOWER($5) OR LOWER(handle)=LOWER($5)`,
-                        [channelName, userHandle, channelIcon, ch.id || channelId, user]
+                         WHERE id=$4 OR LOWER(name)=LOWER($5) OR LOWER(handle)=LOWER($5) OR LOWER(REPLACE(name, '@', ''))=LOWER($6)`,
+                        [channelName, userHandle, channelIcon, ch.id || channelId, mention, cleanUser]
                     );
-                    message = `@${user} is already in the ranking!`;
+                    message = `${mention} is already in the ranking!`;
                 }
                 break;
             }
             case 'refresh': {
                 rankingVersion++;
-                message = `@${user} 🔄 Refreshed! Reloading index.html...`;
+                message = `${mention} 🔄 Refreshed! Reloading index.html...`;
                 break;
             }
-            case 'growth':    message = `@${user} Growth: ${(ch.growth||0).toLocaleString()}`; break;
-            case 'subcount':  message = `@${user} Subscribers: ${(ch.subs||0).toLocaleString()}`; break;
-            case 'viewcount': message = `@${user} Views: ${(ch.views||0).toLocaleString()}`; break;
+            case 'growth':    message = `${mention} Growth: ${(ch.growth||0).toLocaleString()}`; break;
+            case 'subcount':  message = `${mention} Subscribers: ${(ch.subs||0).toLocaleString()}`; break;
+            case 'viewcount': message = `${mention} Views: ${(ch.views||0).toLocaleString()}`; break;
             default: {
-                if (videoCommands.includes(cmd)) {
+                if (videoCommands.includes(command)) {
                     let g, vg;
-                    switch(cmd) {
+                    switch(command) {
                         case 'video':  g=rand(10,50);   vg=rand(g*2,g*4); break;
                         case 'short':  g=rand(10,50);   vg=rand(g*2,g*4); break;
                         case 'stream': g=rand(1,350);   vg=rand(g*2,g*5); break;
@@ -571,22 +593,31 @@ app.get('/api/command', async (req, res) => {
                     }
                     const targetId = ch.id || ch.name;
                     await pool.query(
-                        `UPDATE channels SET growth=growth+$1, view_growth=view_growth+$2 WHERE id=$3 OR LOWER(name)=LOWER($4)`,
-                        [g, vg, targetId, user]
+                        `UPDATE channels SET growth=growth+$1, view_growth=view_growth+$2 WHERE id=$3 OR LOWER(name)=LOWER($4) OR LOWER(handle)=LOWER($4) OR LOWER(REPLACE(name, '@', ''))=LOWER($5)`,
+                        [g, vg, targetId, mention, cleanUser]
                     );
                     const qs = req.query;
                     const rawTitle = [
                         qs.title, qs.q, qs.message, qs.text, qs.arg, qs['1']
-                    ].map(v => (v || '').trim()).filter(v => v !== '' && v !== 'undefined').find(Boolean) || '';
+                    ].map(v => (v || '').trim()).filter(v => v !== '' && v !== 'undefined' && v !== '$(querystring)').find(Boolean) || '';
                     const videoTitle = rawTitle !== '' ? rawTitle : 'No Title';
                     const videoId    = Date.now().toString(36)+Math.random().toString(36).substr(2,5);
                     const icon = ch ? ch.icon : '';
                     await pool.query(
                         `INSERT INTO videos (id, title, channel_id, channel_name, channel_icon, views, view_growth)
                          VALUES ($1, $2, $3, $4, $5, 0, $6)`,
-                        [videoId, videoTitle, targetId, ch.name || user, icon, vg]
+                        [videoId, videoTitle, targetId, ch ? ch.name : mention, icon, vg]
                     );
-                    message = `@${user} Posted a Video "${videoTitle}"`;
+
+                    const ACTION_LABELS = {
+                        video:  'Posted a Video',
+                        short:  'Posted a Short Video',
+                        stream: 'Started a Live Stream',
+                        viral:  'Posted a Viral Video',
+                        trend:  'Posted a Trending Video'
+                    };
+                    const actionText = ACTION_LABELS[command] || 'Posted a Video';
+                    message = `${mention} ${actionText} "${videoTitle}"`;
                 } else {
                     return res.send(`Unknown command: !${cmd}`);
                 }
