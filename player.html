@@ -525,7 +525,7 @@ async function loadGenre(cmd) {
   }
 
   try {
-    let url = '/api/video-top50';
+    let url = `/api/video-top50?cmd=${encodeURIComponent(cmd)}`;
     if (cmd === 'top') url = '/api/ranking';
     const r = await fetch(url);
     const d = await r.json();
@@ -534,9 +534,9 @@ async function loadGenre(cmd) {
       renderTopChannels(d.ranking || []);
     } else {
       let videos = (d.videos || []).filter(v => v && v.title !== '---');
-      if (cmd === 'live') videos = videos.filter(v => v.isLive);
-      if (cmd === 'short') videos = videos.filter(v => v.isShort || (v.duration && parseDuration(v.duration) <= 60));
-      if (cmd === 'trend') videos = [...videos].sort((a,b) => (b.views||0)-(a.views||0));
+      if (cmd === 'live') videos = videos.filter(v => v.isLive || v.type === 'stream');
+      if (cmd === 'short') videos = videos.filter(v => v.isShort || v.type === 'short' || (v.duration && parseDuration(v.duration) <= 60));
+      if (cmd === 'trend') videos = [...videos].sort((a,b) => ((b.views||0)+(b.viewGrowth||0)) - ((a.views||0)+(a.viewGrowth||0)));
       renderVideoGrid(videos.slice(0, 30));
     }
   } catch(e) {
@@ -676,14 +676,12 @@ async function openChannel(channelId, channelName) {
 
 async function loadChannelVideos(channelId, channelName) {
   try {
-    const r = await fetch('/api/video-top50');
+    const r = await fetch(`/api/video-top50?channel=${encodeURIComponent(channelName||'')}&channelId=${encodeURIComponent(channelId||'')}`);
     const { videos } = await r.json();
-    const nameLower = (channelName || '').toLowerCase();
-    const chVideos = (videos||[]).filter(v => v && (
-      (v.channelName || '').toLowerCase() === nameLower ||
-      (channelId && v.channelId === channelId)
-    ));
+    const chVideos = videos || [];
     renderChVideos(chVideos);
+    const vidsMeta = document.getElementById('ch-vids-meta');
+    if (vidsMeta) vidsMeta.textContent = fmt(chVideos.length);
   } catch(e) {
     renderChVideos([]);
   }
