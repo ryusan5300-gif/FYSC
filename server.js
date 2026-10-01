@@ -94,6 +94,11 @@ async function initDB() {
     `);
     try {
         await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS channel_id TEXT DEFAULT '';`);
+        await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS created_at BIGINT DEFAULT 0;`);
+        await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'video';`);
+        await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_short BOOLEAN DEFAULT FALSE;`);
+        await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_live BOOLEAN DEFAULT FALSE;`);
+        await pool.query(`ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT '';`);
     } catch(e) {}
 
     await pool.query(`
@@ -187,7 +192,12 @@ async function findChannel(queryStr) {
 async function getAllVideos() {
     const { rows } = await pool.query(
         `SELECT id, title, channel_id AS "channelId", channel_name AS "channelName", channel_icon AS "channelIcon",
-                views, view_growth AS "viewGrowth"
+                views, view_growth AS "viewGrowth",
+                COALESCE(created_at, 0) AS "createdAt",
+                COALESCE(type, 'video') AS "type",
+                COALESCE(is_short, FALSE) AS "isShort",
+                COALESCE(is_live, FALSE) AS "isLive",
+                COALESCE(duration, '') AS "duration"
          FROM videos WHERE title IS NOT NULL AND title <> ''`
     );
     return rows;
@@ -603,10 +613,22 @@ app.get('/api/command', async (req, res) => {
                     const videoTitle = rawTitle !== '' ? rawTitle : 'No Title';
                     const videoId    = Date.now().toString(36)+Math.random().toString(36).substr(2,5);
                     const icon = ch ? ch.icon : '';
+                    const isShort = (command === 'short');
+                    const isLive  = (command === 'stream');
+                    let duration = '';
+                    if (isShort) {
+                        duration = '0:' + String(rand(15, 59)).padStart(2, '0');
+                    } else if (isLive) {
+                        duration = '';
+                    } else {
+                        duration = rand(2, 12) + ':' + String(rand(0, 59)).padStart(2, '0');
+                    }
+                    const now = Date.now();
+
                     await pool.query(
-                        `INSERT INTO videos (id, title, channel_id, channel_name, channel_icon, views, view_growth)
-                         VALUES ($1, $2, $3, $4, $5, 0, $6)`,
-                        [videoId, videoTitle, targetId, ch ? ch.name : mention, icon, vg]
+                        `INSERT INTO videos (id, title, channel_id, channel_name, channel_icon, views, view_growth, created_at, type, is_short, is_live, duration)
+                         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10, $11)`,
+                        [videoId, videoTitle, targetId, ch ? ch.name : mention, icon, vg, now, command, isShort, isLive, duration]
                     );
 
                     const ACTION_LABELS = {
@@ -656,9 +678,86 @@ app.get('/api/fastest-growth', async (_req, res) => {
 });
 
 // ── API: video-top50 ─────────────────────────────────
-app.get('/api/video-top50', async (_req, res) => {
-    try { const videos=await getAllVideos(); res.json({videos:[...videos].sort((a,b)=>b.views-a.views).slice(0,50)}); }
-    catch(e) { res.status(500).json({videos:[]}); }
+app.get('/api/video-top50', async (req, res) => {
+    try {
+        const { cmd, channel, channelId, sort } = req.query;
+        const videos = await getAllVideos();
+
+        // チャンネル指定がある場合 (チャンネル個別ページ)
+        if (channel || channelId) {
+            const ch = await findChannel(channel || channelId);
+            const resolvedId = ch ? ch.id : (channelId || '');
+            const resolvedName = ch ? ch.name : (channel || '');
+            const cleanQuery = (channel || '').toLowerCase().replace(/^@+/, '');
+
+            const chVideos = videos.filter(v => {
+                const vId = (v.channelId || '').toLowerCase();
+                const vName = (v.channelName || '').toLowerCase().replace(/^@+/, '');
+                return (resolvedId && vId === resolvedId.toLowerCase()) ||
+                       (resolvedName && vName === resolvedName.toLowerCase().replace(/^@+/, '')) ||
+                       (cleanQuery && vName === cleanQuery) ||
+                       (cleanQuery && vId === cleanQuery);
+            });
+            chVideos.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || (b.views || 0) - (a.views || 0));
+            return res.json({ videos: chVideos });
+        }
+
+        // コマンド / ジャンル別
+        if (cmd === 'video') {
+            // LATEST VIDEOS: 新着順
+            const latest = [...videos].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || (b.views || 0) - (a.views || 0));
+            return res.json({ videos: latest.slice(0, 50) });
+        }
+        if (cmd === 'short') {
+            // SHORTS: ショート動画 (isShort または type === 'short') 新着順
+            const shorts = videos.filter(v => v.isShort || v.type === 'short');
+            shorts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || (b.views || 0) - (a.views || 0));
+            return res.json({ videos: shorts.slice(0, 50) });
+        }
+        if (cmd === 'live') {
+            // LIVE: ライブ配信
+            const live = videos.filter(v => v.isLive || v.type === 'stream');
+            live.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || (b.views || 0) - (a.views || 0));
+            return res.json({ videos: live.slice(0, 50) });
+        }
+        if (cmd === 'trend') {
+            // TRENDING: 再生数 + 成長数
+            const trend = [...videos].sort((a, b) => ((b.views || 0) + (b.viewGrowth || 0)) - ((a.views || 0) + (a.viewGrowth || 0)));
+            return res.json({ videos: trend.slice(0, 50) });
+        }
+        if (cmd === 'home') {
+            // HOME: 新着順で表示
+            const home = [...videos].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || (b.views || 0) - (a.views || 0));
+            return res.json({ videos: home.slice(0, 50) });
+        }
+
+        // パラメータなしの場合
+        const byViews = [...videos].sort((a, b) => (b.views || 0) - (a.views || 0));
+        const referer = req.headers.referer || '';
+        if (sort === 'views' || referer.includes('videotop') || referer.includes('VideoViewTOP50')) {
+            return res.json({ videos: byViews.slice(0, 50) });
+        }
+
+        // 一般アクセスでクエリなしの場合：新着動画（createdAt > 0）を先頭に、再生数上位を結合して重複排除
+        const recent = [...videos].filter(v => (v.createdAt || 0) > 0).sort((a, b) => b.createdAt - a.createdAt);
+        const seenIds = new Set();
+        const combined = [];
+        for (const v of recent.slice(0, 20)) {
+            seenIds.add(v.id);
+            combined.push(v);
+        }
+        for (const v of byViews) {
+            if (!seenIds.has(v.id)) {
+                seenIds.add(v.id);
+                combined.push(v);
+            }
+            if (combined.length >= 50) break;
+        }
+        res.json({ videos: combined });
+    } catch(e) {
+        console.error('video-top50 error:', e.message);
+        res.status(500).json({ videos: [] });
+    }
 });
 
 // ── API: suggest ─────────────────────────────────────
